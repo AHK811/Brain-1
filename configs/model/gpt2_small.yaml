@@ -1,0 +1,19 @@
+model:
+  name: gpt2-small
+  vocab_size: 50257
+  max_position_embeddings: 1024
+  hidden_size: 768
+  num_layers: 12
+  num_heads: 12
+  num_kv_heads: 12
+  intermediate_size: 3072
+  ffn_type: gelu_mlp
+  norm_type: layernorm
+  position_embedding_type: learned
+  attention_type: mha
+  attention_bias: true
+  mlp_bias: true
+  tie_word_embeddings: true
+  dropout: 0.0
+  rope_scaling_type: null
+  rope_scaling_factor: 1.0

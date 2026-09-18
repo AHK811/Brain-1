@@ -1,0 +1,24 @@
+# Brain v0.4 — multimodal-ready config
+# Same ~33.2M text backbone as v0.3; multimodal via ingest + optional projectors.
+model:
+  name: brain-0.4
+  vocab_size: 32768
+  max_position_embeddings: 4096
+  hidden_size: 384
+  num_layers: 12
+  num_heads: 6
+  num_kv_heads: 2
+  intermediate_size: 1152
+  rope_theta: 500000.0
+  rope_scaling_type: ntk
+  rope_scaling_factor: 2.0
+  norm_eps: 1.0e-5
+  attention_bias: false
+  mlp_bias: false
+  tie_word_embeddings: true
+  dropout: 0.0
+# Multimodal metadata (not all consumed by BrainConfig yet — documented intent)
+multimodal:
+  vision_dim: 768
+  vision_tokens: 64
+  projector_depth: 2

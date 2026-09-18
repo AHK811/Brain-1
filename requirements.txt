@@ -1,0 +1,9 @@
+torch>=2.1
+pyyaml>=6.0
+tokenizers>=0.15
+numpy>=1.24
+# --- optional ingest / OCR / ASR ---
+# pypdf pdfplumber python-docx python-pptx openpyxl
+# pillow pytesseract easyocr
+# openai-whisper faster-whisper
+# opencv-python-headless

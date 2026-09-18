@@ -1,0 +1,1 @@
+# Models\n\n```python\nfrom Models import create_model\nm = create_model('o-mini')  # or '250m' / '500m'\n```\n

@@ -1,0 +1,20 @@
+model:
+  name: brain-v5-96
+  vocab_size: 32768
+  max_position_embeddings: 4096
+  hidden_size: 1536
+  num_layers: 96
+  num_heads: 96
+  num_kv_heads: 16
+  intermediate_size: 6144
+  rope_theta: 500000.0
+  rope_scaling_type: yarn
+  rope_scaling_factor: 2.0
+  use_qk_norm: true
+  attention_type: gqa
+  sparse_alternating: true
+  sparse_local_window: 128
+  ffn_type: swiglu
+  norm_type: rmsnorm
+  position_embedding_type: rope
+  tie_word_embeddings: true

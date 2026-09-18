@@ -1,0 +1,30 @@
+# Brain v0.3 — ~33M parameter configuration
+#
+# Priority 1 upgrades from v0.2:
+#   - Context: 2048 → 4096
+#   - RoPE theta: 10000 → 500000 (better long-context stability)
+#   - RoPE scaling: NTK-aware (factor 2.0) for graceful extension
+#   - GQA 6→2, SwiGLU, tied embeddings kept (already solid)
+#
+# Still out of scope for this config (coming in later v0.3 stages):
+#   - SFT / instruction tuning stage
+#   - Tool-calling format
+#   - MoE / deeper variants
+#   - Explicit reasoning modules
+model:
+  name: brain-0.3
+  vocab_size: 32768
+  max_position_embeddings: 4096
+  hidden_size: 384
+  num_layers: 12
+  num_heads: 6
+  num_kv_heads: 2
+  intermediate_size: 1152
+  rope_theta: 500000.0
+  rope_scaling_type: ntk
+  rope_scaling_factor: 2.0
+  norm_eps: 1.0e-5
+  attention_bias: false
+  mlp_bias: false
+  tie_word_embeddings: true
+  dropout: 0.0

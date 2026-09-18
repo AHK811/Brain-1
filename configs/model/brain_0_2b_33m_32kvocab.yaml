@@ -1,0 +1,21 @@
+# Brain v0.2b — honestly named variant of v0.2 architecture with larger vocab.
+# Same body as v0.2 (12×384, GQA 6→2) but vocab_size=32768, context=2048.
+# NOT the same as v0.3 (v0.3 adds NTK RoPE scaling + 4096 context).
+# Parameter count ≈ 33.2M. Treat as a separate experiment; do not load v0.2 ckpts.
+model:
+  name: brain-0.2b
+  vocab_size: 32768
+  max_position_embeddings: 2048
+  hidden_size: 384
+  num_layers: 12
+  num_heads: 6
+  num_kv_heads: 2
+  intermediate_size: 1152
+  rope_theta: 10000.0
+  rope_scaling_type: null
+  rope_scaling_factor: 1.0
+  norm_eps: 1.0e-5
+  attention_bias: false
+  mlp_bias: false
+  tie_word_embeddings: true
+  dropout: 0.0
