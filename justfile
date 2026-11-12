@@ -29,6 +29,12 @@ venv:
 golden *OPS:
     {{py}} -m brainlab.export.make_golden {{OPS}}
 
+prepare *ARGS:
+    {{py}} -m brainlab.data.prepare {{ARGS}}
+
+overfit:
+    MSYS_NO_PATHCONV=1 wsl.exe bash -c "bash /mnt/d/BRAIN-LAB/scripts/wsl_run.sh /mnt/d/BRAIN-LAB/scripts/wsl_overfit_check.sh"
+
 build:
     cd rust && {{cargo}} build --workspace --release
 

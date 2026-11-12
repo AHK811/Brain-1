@@ -479,6 +479,13 @@ a requested 0.5% (D029 now refuses that); `just gen` hard-coded `--charlevel`, d
 `--device cuda` in `generate.py` selected CPU; and `prepare` had no way to say whether the tokenizer had been
 trained on val files, which it now refuses.
 
+**The model can learn, which nothing so far had shown.** `scripts/wsl_overfit_check.sh` (`just overfit`)
+packs two sequences, trains on that single batch, and requires the loss to collapse. On this host it went from
+the uniform floor of 9.7041 to **0.1100 by step 10 and 0.0028 by step 40**, with `grad_norm` falling from
+2.66 to 0.013 and no false divergence. Parity tests can prove a forward pass matches PyTorch and still leave a
+loss or optimizer bug that makes learning impossible; this is the check that closes that gap, and it also
+confirmed the epoch fix (a one-batch epoch reports `epoch` equal to the step count).
+
 **Not verified, deliberately.** The claim that the tied output projection is not really fp32 under autocast
 was read from the code and not measured: this host has no CUDA device, and an fp32 head costs roughly 30% more
 step time. It is a preflight item on the T4, not a change - measure validation loss with `logits.dtype`

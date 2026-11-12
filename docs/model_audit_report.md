@@ -95,6 +95,7 @@ Python's model code is Python orchestration over PyTorch tensor operations; the 
 | `scripts/wsl_clone_check.sh` | 32/32 modules import from a clean clone; wheel carries `brainlab.data` | The repository is self-sufficient, not just the working tree |
 | `scripts/wsl_cli_check.sh` | leak hit exits 1, vacuous span exits 1, interpreter status propagates | The exit codes the docs promise are the exit codes the tools produce |
 | `scripts/wsl_resume_equiv.sh` | 8 steps uninterrupted vs SIGTERM-then-resume: worst loss difference 0.000e+00, same `best.pt` | Resume replays neither data nor schedule nor best score |
+| `scripts/wsl_overfit_check.sh` | loss 9.7041 (uniform) to 0.1100 at step 10 and 0.0028 at step 40 on one batch | The model, loss and optimizer can actually learn, which parity tests alone cannot show |
 | fresh clone without goldens | 0 failed, 51 passed, 19 skipped | Tensor-dependent suites skip and name `just golden` instead of raising |
 
 `logs/commit.txt` names the commit each gate run was produced from, so a green log can be tied to a tree.
