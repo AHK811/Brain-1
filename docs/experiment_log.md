@@ -492,3 +492,34 @@ step time. It is a preflight item on the T4, not a change - measure validation l
 recorded at fp16 and fp32 and only switch if the gap exceeds about 0.002 nats. The `residual_scale_layers`
 field still equals `n_layers`; it is a separate knob by design, and touching it now would move the
 initialisation and invalidate the committed goldens.
+
+## 2026-11-12 (later) - the Kaggle lane, and a Windows-only failure in my own test
+
+**A resume test that passed in WSL failed here.** `tests/test_resume_state.py` reported
+`OSError: [Errno 22] Invalid argument` writing `train/000000.bin` on this Windows host, in the *second* call to
+`make_shards(tmp_path)`. The first pack succeeds; `TokenShards.open` memory-maps every shard and nothing ever
+closes the mapping, so re-packing into the same directory tries to truncate a live file. Linux permits it and
+the test passed there. Each batcher now gets its own directory, which does not weaken the assertion - the
+fixture corpus comes from a fixed formula with no RNG, so three directories hold byte-identical shards. Suite
+back to **85 passed, 7 skipped**.
+
+**`notebooks/kaggle_train.ipynb` was executed, not just written.** Its Python cells ran in order on this host
+against a temporary stand-in for `/kaggle/working`, with the accelerator cells stubbed, and that is what found
+the three problems below. The notebook has still never run on a Kaggle T4 - there is no CUDA device here.
+
+**The synthetic fallback cannot satisfy the split it is configured for.** One synthetic document becomes one
+file, and validation is chosen by file-level stride, so at the configured `val_ratio` of 0.005 a
+`--synthetic 400000` corpus (3,669 files) yields 19 val files and **13 val sequences**. `train.py` refuses to
+start: the guard at `python/brainlab/train/train.py:188` requires two full eval windows, and a window is
+`eval_batches * min(micro_batch, len(val))` sequences, so with `micro_batch = 8` the ceiling is
+`eval_batches <= val_sequences // 16`. Thirteen sequences cannot support even one batch of either window.
+Raising the fallback to `--val-ratio 0.05` gives 184 val files and 133 sequences, which supports
+`--eval-batches 8`.
+
+**`brainlab leak` fires on synthetic text, and that is the corpus, not the split.** At span 50 with the
+byte-level tokenizer it reports every sampled val sequence matching train windows - 32,311 matching windows out
+of 39,000 sampled - while `shared_source_files` stays empty. The matched tokens decode to `synthetic_docs`
+template sentences (`"...atches the reference however within a stated tolerance"`), which recur verbatim because
+the generator reuses a small phrase pool. So the notebook reads `shared_source_files` as the split-correctness
+signal and treats window matches as fatal only against a real corpus. A leak check that came back clean on
+synthetic text would tell you nothing about your data.

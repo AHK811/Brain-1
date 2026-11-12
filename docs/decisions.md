@@ -329,3 +329,23 @@ parity claims, and a push from this machine cannot assume the local tree is repr
 lost its `.git` directory once during development. Tests that need golden tensors now skip with a message that
 names `just golden` instead of failing with `FileNotFoundError`: the index is committed, the 540 MB of tensors
 are not, so a fresh clone is a legitimate place to run the non-tensor tests.
+
+## D032 - the Kaggle lane drives the pipeline from Python, not from `just`
+
+`notebooks/kaggle_train.ipynb` shells out to `python -m brainlab...` for every step that needs a value computed
+in an earlier cell. Three reasons, all found by running the cells rather than by reading them.
+
+A `%%bash` cell cannot see a Python name, so `"$PY"` and `${DEVICE}` in a bash cell silently expand to empty
+strings and the harness picks up whatever interpreter the container defaults to. Passing state through the
+kernel's environment instead would have made the notebook depend on install order. `setup_colab.sh` also
+creates its venv partway through, so the interpreter is resolved *after* the install cell, not before it.
+
+`just` is not installed by any script in the repository, which made the Colab instructions in the README
+unrunnable on a fresh container. The recipes are thin wrappers around `python -m`, so the notebook does without
+and the README now says how to get `just` if you want it.
+
+Interruption is the part worth writing down: `train.py` installs no signal handler and writes `last.pt` only
+when the loop finishes. A killed run therefore resumes from the newest `step-NNNNNN.pt`, and a cell that
+suggested `--resume last.pt` after a timeout would hand back a path that does not exist and restart the run
+from step 0. `latest_cursor` picks the highest-numbered step file and deliberately ignores `best.pt`, whose
+cursor does not describe a position in the data.

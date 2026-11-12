@@ -155,6 +155,7 @@ Brain-1/
 │   └── results/                # Benchmark outputs and reports
 │
 ├── scripts/                   # Setup, environment checks and verification scripts
+├── notebooks/                  # Hosted-runtime notebooks (Kaggle training lane)
 ├── docs/                       # Engineering decisions and experiment log
 ├── justfile                    # Common development commands
 └── pyproject.toml
@@ -227,6 +228,11 @@ just table
 
 These commands exercise the reference/golden workflow and the benchmark harness. They are not evidence that a complete pretraining run has been performed.
 
+The current suite is **85 passed, 7 skipped** on this host. Every skip is a GPU row, a Linux-only Rust
+binary, or a rust-trained tokenizer cross-check that needs `BRAINLAB_TOKENIZER_DIR`. On a fresh clone with
+no golden tensors it is 51 passed, 19 skipped — the tensor suites explain how to generate them instead of
+failing.
+
 ### GPU notebook environments
 
 For a disposable Colab or Kaggle environment, the repository includes setup and GPU-check scripts:
@@ -241,6 +247,38 @@ For a disposable Colab or Kaggle environment, the repository includes setup and 
 
 GPU commands require a compatible runtime. A CPU-only environment cannot produce meaningful CUDA, Triton, or GPU-throughput results.
 
+`setup_colab.sh` installs the pinned Rust toolchain but not `just`, so the `just ...` recipes above need
+`cargo install just` first — or call the module directly, which is what every recipe wraps:
+
+```bash
+!cargo install just                                # once per container
+!.venv/bin/python -m brainlab.eval.perplexity --model checkpoints/brainlab-33m.safetensors --amp
+!brainlab bench --tag t4                           # same harness, no just required
+```
+
+`--out` defaults to `checkpoints/`, which lives inside the cloned directory and is deleted when the runtime
+detaches. Point training at mounted storage instead, or a long run ends when the cell does:
+
+```bash
+!just train --out /content/drive/MyDrive/brainlab-ckpt --steps 8000   # Colab
+!just train --out /kaggle/working/brainlab-ckpt --steps 8000          # Kaggle
+```
+
+Resume is safe from that same directory: the checkpoint carries the data cursor and the best score, so a
+disconnect continues the run instead of replaying its first batches (see `docs/decisions.md`, D028). A
+step-by-step Kaggle notebook ships as [`notebooks/kaggle_train.ipynb`](notebooks/kaggle_train.ipynb).
+
+### Before a long run
+
+A parity-green tree is not evidence that the model learns. In order:
+
+1. Fresh clone, `pip install -e .`, `just golden`, `just test` — the suite must pass with nothing carried over.
+2. `just prepare` on the real corpus, then read `prepare_report.json` for `val_fraction` and `doc_sep`, and run `brainlab leak` against the packed splits.
+3. `just overfit`: one batch of data, many steps, loss should approach 0. If it plateaus near `ln(vocab_size)`, the model, the optimizer, or the loss has a bug no parity test can see.
+4. One short run on the GPU with `--amp`: `brainlab-ppl --amp` prints the logits dtype, which is how to check whether the tied output head really runs in fp16.
+5. `just wsl-resume`: kill a run mid-flight, resume it, and require the loss curve to match.
+6. Only then the full run, ending with `brainlab-ppl` over the whole validation set.
+
 ### Rust on Windows
 
 The repository's documented native Rust verification lane is WSL2/Linux. The current Windows setup has toolchain/linker constraints; use WSL2 for the Rust workspace checks described by the `justfile`:
@@ -251,6 +289,9 @@ just wsl-test
 just wsl-bench
 just table-rust
 just wsl-verify
+just wsl-clone      # a clean clone must import, and no ignore rule may hide source
+just wsl-cli        # the exit codes the docs promise (leak fails, ppl helps) really happen
+just wsl-resume     # kill a run mid-flight, resume it, and require the loss curve to match
 ```
 
 ## Training configuration
@@ -322,7 +363,7 @@ The next engineering priorities are:
 - Harden dataset ingestion, including Parquet-capable sources and preservation of official dataset splits.
 - Enforce exact tokenizer/model vocabulary compatibility before training or generation.
 - Make data preparation idempotent and verify shard manifests and checksums.
-- Strengthen checkpoint resume so optimizer, RNG, data-order, and best-validation state are reproducible.
+- ~~Strengthen checkpoint resume so optimizer, RNG, data-order, and best-validation state are reproducible.~~ Done: the checkpoint carries the data cursor and best score, the config's peak LR wins over the saved one, and `just wsl-resume` requires a killed-and-resumed loss curve to match an uninterrupted run.
 - Add a clean end-to-end smoke test: data → tokenizer → packed shards → forward/backward → checkpoint → resume → generation.
 - Run and publish GPU parity and performance measurements on a documented device.
 - Expand benchmark coverage only when the workload and correctness contract are explicit.

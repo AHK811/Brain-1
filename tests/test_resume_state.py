@@ -15,10 +15,10 @@ from brainlab.train.train import cycle, resume_cursor
 CFG = PackConfig(seq_len=32, shard_tokens=32 * 8, eos_id=1)
 
 
-def make_shards(tmp_path: Path) -> TokenShards:
+def make_shards(directory: Path) -> TokenShards:
     docs = [[(index * 7 + step) % 997 + 2 for step in range(32)] for index in range(24)]
-    pack_and_write(docs, tmp_path / "train", "train", CFG)
-    return TokenShards(tmp_path / "train", 32)
+    pack_and_write(docs, directory, "train", CFG)
+    return TokenShards(directory, 32)
 
 
 def first_tokens(batches) -> list[int]:
@@ -26,24 +26,25 @@ def first_tokens(batches) -> list[int]:
 
 
 def test_resume_replays_the_same_batches_as_an_uninterrupted_run(tmp_path: Path) -> None:
-    shards = make_shards(tmp_path)
+    # one directory per batcher: TokenShards keeps its memmaps open, and Windows will not
+    # let a second pack truncate a file that is still mapped.
+    shards = make_shards(tmp_path / "a")
     per_epoch = len(ShardBatcher(shards, 2, shuffle_seed=11))
     assert per_epoch >= 4, "the fixture is too small to cross an epoch boundary"
-    uninterrupted = ShardBatcher(make_shards(tmp_path), 2, shuffle_seed=11)
+    uninterrupted = ShardBatcher(make_shards(tmp_path / "b"), 2, shuffle_seed=11)
     straight = first_tokens(islice(cycle(uninterrupted), per_epoch + 3))
 
-    fresh = ShardBatcher(make_shards(tmp_path), 2, shuffle_seed=11)
+    fresh = ShardBatcher(make_shards(tmp_path / "c"), 2, shuffle_seed=11)
     resumed = first_tokens(islice(cycle(fresh, per_epoch), 3))
     assert resumed == straight[per_epoch : per_epoch + 3], "a resumed run must not re-serve batches it already trained on"
     assert fresh.epoch == 1, "the cursor should land one epoch in, not restart the shuffle"
 
 
 def test_resume_across_several_epochs(tmp_path: Path) -> None:
-    make_shards(tmp_path)
-    per_epoch = len(ShardBatcher(make_shards(tmp_path), 2, shuffle_seed=5))
-    uninterrupted = ShardBatcher(make_shards(tmp_path), 2, shuffle_seed=5)
+    per_epoch = len(ShardBatcher(make_shards(tmp_path / "a"), 2, shuffle_seed=5))
+    uninterrupted = ShardBatcher(make_shards(tmp_path / "b"), 2, shuffle_seed=5)
     straight = first_tokens(islice(cycle(uninterrupted), 2 * per_epoch + 2))
-    fresh = ShardBatcher(make_shards(tmp_path), 2, shuffle_seed=5)
+    fresh = ShardBatcher(make_shards(tmp_path / "c"), 2, shuffle_seed=5)
     assert first_tokens(islice(cycle(fresh, 2 * per_epoch), 2)) == straight[-2:]
 
 
@@ -58,10 +59,10 @@ def test_cursor_arithmetic() -> None:
 
 
 def test_start_batch_wider_than_an_epoch_wraps_instead_of_rejecting(tmp_path: Path) -> None:
-    per_epoch = len(ShardBatcher(make_shards(tmp_path), 2, shuffle_seed=3))
-    uninterrupted = ShardBatcher(make_shards(tmp_path), 2, shuffle_seed=3)
+    per_epoch = len(ShardBatcher(make_shards(tmp_path / "a"), 2, shuffle_seed=3))
+    uninterrupted = ShardBatcher(make_shards(tmp_path / "b"), 2, shuffle_seed=3)
     expected = first_tokens(islice(cycle(uninterrupted), 4 * per_epoch, 4 * per_epoch + 2))
-    fresh = ShardBatcher(make_shards(tmp_path), 2, shuffle_seed=3)
+    fresh = ShardBatcher(make_shards(tmp_path / "c"), 2, shuffle_seed=3)
     assert first_tokens(islice(cycle(fresh, 4 * per_epoch), 2)) == expected
     assert fresh.epoch == 4, "the resumed batcher sits inside epoch 4, it has not finished it"
 
