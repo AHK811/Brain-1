@@ -120,3 +120,5 @@ def corpus_digest(files: Sequence[tuple[str, str]]) -> str:
         digest.update(b"\0")
         digest.update(text.encode("utf-8", errors="replace"))
     return digest.hexdigest()
+
+
