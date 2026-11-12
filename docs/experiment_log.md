@@ -523,3 +523,29 @@ template sentences (`"...atches the reference however within a stated tolerance"
 the generator reuses a small phrase pool. So the notebook reads `shared_source_files` as the split-correctness
 signal and treats window matches as fatal only against a real corpus. A leak check that came back clean on
 synthetic text would tell you nothing about your data.
+
+**The notebook was verified by executing it.** Every Python cell in `notebooks/kaggle_train.ipynb` ran in order
+against a temporary stand-in for `/kaggle/working`, with the two accelerator cells stubbed and the batch shrunk
+to `micro_batch 1, accum 1` so the chain finishes in minutes instead of hours. 17 cells, no failures. Five of
+the defects it caught were in the notebook, not in `train.py`:
+
+1. eval rows carry `val_loss`/`val_ppl` while train rows carry `loss`, so the analysis cell raised `KeyError`.
+2. the track/select check compared **step numbers**, and `train.py` emits both rows at the same step by design,
+   so the assertion would have fired at step 250 on Kaggle - forty minutes into a real run. It now checks the
+   ranges in `eval_track_window` and `eval_select_window` instead.
+3. if the session budget expired before the first `step-NNNNNN.pt`, `latest_cursor` returned `None` and the cell
+   printed `--resume None`, which the exporter turned into `FileNotFoundError: 'None'`.
+4. decoding a matched leak window crashed on token id 257 - eos sits above the byte range, so `bytes()` refuses
+   it. Special ids are now counted rather than decoded.
+5. the fp16-head verdict. See D033: it recommended keeping fp16 heads from a gap of 0.00000 measured between
+   two fp32 runs.
+
+**Measured on this host, for sizing the Kaggle output directory.** `best.pt` and each `step-NNNNNN.pt` are
+300.0 MB (133.2 MB of weights, the rest optimizer state), so `--keep 3` plus `best.pt` plus the exported
+safetensors came to 1,633 MB. Validation perplexity over 16 batches (131,072 tokens) of the six-step smoke
+checkpoint: loss 6.9518, ppl 1045.06, 10.029 bits/token, `logits_dtype torch.float32` in both the plain and
+`--amp` runs, which is the CPU fallback and not a measurement of the fp16 head.
+
+**Observed while sampling.** `brainlab generate` warns `model head has 16384 rows, tokenizer has 258 tokens;
+ids above 257 are undecodable`, and 32 of 96 tokens in one sample were undecodable. Pairing the byte vocab with
+the spec-sized head leaves 16,126 rows that no training token can occupy.

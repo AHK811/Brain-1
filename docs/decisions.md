@@ -349,3 +349,23 @@ when the loop finishes. A killed run therefore resumes from the newest `step-NNN
 suggested `--resume last.pt` after a timeout would hand back a path that does not exist and restart the run
 from step 0. `latest_cursor` picks the highest-numbered step file and deliberately ignores `best.pt`, whose
 cursor does not describe a position in the data.
+
+## D033 - a notebook may not conclude from a comparison that never ran
+
+`notebooks/kaggle_train.ipynb` compares validation loss with and without `--amp` and applies the 0.002-nat rule
+from `docs/model_audit_report.md`. On a CPU host that comparison produced a gap of exactly 0.00000 and printed
+"keep fp16 heads" - a confident recommendation derived from two identical fp32 runs, because
+`brainlab.eval.perplexity` falls back to fp32 when autocast has no CUDA device.
+
+The cell now compares the two reported `logits_dtype` values first. Identical dtypes mean autocast never
+engaged, so it prints NOT MEASURED and offers no verdict; only a real fp16-vs-fp32 pair reaches the threshold.
+The rule generalises: a zero from a test that was skipped is not a result, and a notebook is the worst place to
+lose that distinction because it reads like a conclusion.
+
+Two facts the same pass made concrete. A checkpoint is 300 MB - 133 MB of weights plus optimizer state - so the
+default `--keep 3` plus `best.pt` puts about 1.6 GB in the output directory, which is why the notebook ends by
+printing sizes and a clean `git status` rather than leaving that discovery to a failed push. And on the
+`--charlevel` route, 16,126 of the 16,384 output rows correspond to no possible token, so sampling from an
+undertrained model emits undecodable ids (32 of 96 tokens in one sample) and perplexity starts near the
+16,384-way uniform floor. That is a property of pairing a byte vocab with the spec-sized head, not a bug in
+either; changing `vocab_size` would move the goldens, so it is recorded instead.

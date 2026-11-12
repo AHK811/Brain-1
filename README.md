@@ -268,6 +268,11 @@ Resume is safe from that same directory: the checkpoint carries the data cursor 
 disconnect continues the run instead of replaying its first batches (see `docs/decisions.md`, D028). A
 step-by-step Kaggle notebook ships as [`notebooks/kaggle_train.ipynb`](notebooks/kaggle_train.ipynb).
 
+Kaggle notebooks ship with **Internet off**, which makes the clone cell fail with `git` exit 128 and no
+message, because `%%bash` captures stderr and discards it on failure. Turn Internet on for the clone and the
+install; after that the notebook needs no network, since the corpus route reads attached Kaggle Datasets of
+plain text rather than downloading from Hugging Face.
+
 ### Before a long run
 
 A parity-green tree is not evidence that the model learns. In order:
