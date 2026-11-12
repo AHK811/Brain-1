@@ -375,10 +375,10 @@ either; changing `vocab_size` would move the goldens, so it is recorded instead.
 `python/brainlab/train/train.py:274` writes the config header twice in two different formats: compact into
 `<out>/train_log.jsonl`, and pretty-printed with `indent=2` to stdout. A pretty JSON object on stdout begins
 with a line containing only `{`, so the `line.startswith('{"')` filter that every consumer of the stdout log
-uses - the notebooks, `scripts/wsl_overfit_check.sh` - silently drops the header while keeping every train and
-eval row.
+uses - `notebooks/kaggle_train.ipynb` and `scripts/wsl_overfit_check.sh` - silently drops the header while
+keeping every train and eval row.
 
-Both analysis cells therefore printed `None` for `git`, `device`, `dtype`, `resumed_from`, `start_batch`,
+The analysis cells therefore printed `None` for `git`, `device`, `dtype`, `resumed_from`, `start_batch`,
 `peak_lrs` and both eval windows, and then skipped the track/select disjointness check because it was guarded
 by `if track_window and select_window:`. The guard that exists to catch selection on the reporting window
 passed vacuously. That is the worst kind of green: an assertion that cannot fail is worse than no assertion,
