@@ -55,3 +55,4 @@ if final["loss"] > 1.0:
     sys.exit(1)
 print("ok: the model memorised a single batch, so forward, loss and optimiser move together")
 PYEOF
+
