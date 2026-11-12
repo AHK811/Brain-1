@@ -141,15 +141,20 @@ class ShardBatcher:
             rng.shuffle(order)
         return order
 
-    def __iter__(self) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+    def batches(self, start_batch: int = 0) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+        if start_batch < 0:
+            raise ValueError(f"start_batch {start_batch} is negative")
         order = self.indices()
-        for start in range(0, len(order), self.batch_size):
+        for start in range(start_batch * self.batch_size, len(order), self.batch_size):
             chosen = order[start : start + self.batch_size]
             if len(chosen) < self.batch_size and self.drop_last:
                 break
             pairs = [self.shards[int(i)] for i in chosen]
             yield np.stack([p[0] for p in pairs]), np.stack([p[1] for p in pairs])
         self.epoch += 1
+
+    def __iter__(self) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+        return self.batches()
 
     def __len__(self) -> int:
         usable = len(self.shards) // self.batch_size if self.drop_last else -(-len(self.shards) // self.batch_size)

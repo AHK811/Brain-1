@@ -51,6 +51,19 @@ def test_muon_counts_a_non_finite_update_instead_of_hiding_it() -> None:
     assert not torch.equal(param, torch.zeros(4, 4))
 
 
+def test_muon_does_not_decay_a_parameter_it_refused_to_update() -> None:
+    param = torch.ones(4, 4, requires_grad=True)
+    optim = Muon([param], lr=0.5, weight_decay=0.2, momentum=0.0)
+    param.grad = torch.full((4, 4), float("nan"))
+    optim.step()
+    assert optim.skipped_updates() == 1
+    assert torch.equal(param, torch.ones(4, 4)), "a discarded update must not shrink the parameter as well"
+    param.grad = torch.ones(4, 4)
+    optim.step()
+    assert optim.skipped_updates() == 1
+    assert torch.all(param < 1.0), "the poisoned momentum buffer must not freeze the parameter forever"
+
+
 @pytest.mark.parametrize("mode", ["muon", "adamw"])
 def test_both_modes_cover_the_model(spec, mode: str) -> None:
     model = TransformerLM(spec)

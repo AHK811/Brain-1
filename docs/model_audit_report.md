@@ -90,13 +90,18 @@ Python's model code is Python orchestration over PyTorch tensor operations; the 
 | `cargo test --workspace --release` | 19 passed (12 infer-cpu, 7 tokenizer), 0 failed | Pass, parity against `tests/golden` |
 | `cargo clippy --all-targets -- -D warnings` | clean under `-D warnings` | Pass; the profile stamp is a zero-sized `NoStamp` struct, which is what removed the 26 unit-binding findings |
 | `cargo fmt --all --check` | clean | Pass |
-| `pytest` | 63 passed, 7 skipped | All executed tests passed; skips are GPU rows, the Linux-only Rust binary and the rust-trained tokenizer cross-check |
+| `pytest` | 85 passed, 7 skipped | All executed tests passed; skips are GPU rows, the Linux-only Rust binary and the rust-trained tokenizer cross-check |
 | `brainlab self-test` | Prefill/decode match; worst decode absolute error 1.6e-6 | Cache correctness evidence for the tested case |
 | `scripts/wsl_clone_check.sh` | 32/32 modules import from a clean clone; wheel carries `brainlab.data` | The repository is self-sufficient, not just the working tree |
+| `scripts/wsl_cli_check.sh` | leak hit exits 1, vacuous span exits 1, interpreter status propagates | The exit codes the docs promise are the exit codes the tools produce |
+| `scripts/wsl_resume_equiv.sh` | 8 steps uninterrupted vs SIGTERM-then-resume: worst loss difference 0.000e+00, same `best.pt` | Resume replays neither data nor schedule nor best score |
+| fresh clone without goldens | 0 failed, 51 passed, 19 skipped | Tensor-dependent suites skip and name `just golden` instead of raising |
 
 `logs/commit.txt` names the commit each gate run was produced from, so a green log can be tied to a tree.
 
-The latest fixes described for this gate are technically reasonable: the seven PyO3 `useless_conversion` diagnostics appear to be macro-span false positives, so the allow is scoped at the affected crate root (decision D019); the PyO3 `anyhow` feature allows idiomatic anyhow context propagation instead of a generic helper; and `.gitignore` now explicitly re-includes the selected log files. Fresh Clippy and test output is still needed to verify the final tree.
+The seven PyO3 `useless_conversion` diagnostics appear to be macro-span false positives, so the allow is
+scoped at the affected crate root (decision D019); the PyO3 `anyhow` feature allows idiomatic anyhow context
+propagation instead of a generic helper.
 
 ### Source provenance
 

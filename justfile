@@ -92,8 +92,8 @@ export SRC=checkpoints/last.pt DST=checkpoints/brainlab-33m.safetensors DT=f32:
 eval CKPT=checkpoints/brainlab-33m.safetensors:
     {{py}} -m brainlab.eval.perplexity --model {{CKPT}}
 
-gen PROMPT="hello" CKPT=checkpoints/brainlab-33m.safetensors:
-    {{py}} -m brainlab.eval.generate --model {{CKPT}} --charlevel --prompt "{{PROMPT}}"
+gen PROMPT="hello" CKPT=checkpoints/brainlab-33m.safetensors TOK=data/tokenizer:
+    {{py}} -m brainlab.eval.generate --model {{CKPT}} --tokenizer-dir {{TOK}} --prompt "{{PROMPT}}"
 
 rust-gen CKPT=checkpoints/brainlab-33m.safetensors TOK=data/tokenizer:
     cd rust && {{cargo}} run --release -p brainlab-infer-cpu --bin brainlab -- generate --model {{CKPT}} --tokenizer {{TOK}}
@@ -112,6 +112,9 @@ wsl-clone:
 
 wsl-cli:
     MSYS_NO_PATHCONV=1 wsl.exe bash -c "bash /mnt/d/BRAIN-LAB/scripts/wsl_run.sh /mnt/d/BRAIN-LAB/scripts/wsl_cli_check.sh"
+
+wsl-resume:
+    MSYS_NO_PATHCONV=1 wsl.exe bash -c "bash /mnt/d/BRAIN-LAB/scripts/wsl_run.sh /mnt/d/BRAIN-LAB/scripts/wsl_resume_equiv.sh"
 
 wsl-flops *ARGS:
     MSYS_NO_PATHCONV=1 wsl.exe bash -c "bash /mnt/d/BRAIN-LAB/scripts/wsl_run.sh /mnt/d/BRAIN-LAB/scripts/wsl_flops.sh {{ARGS}}"

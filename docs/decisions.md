@@ -269,3 +269,63 @@ unanchored pattern is a directory-name match at any depth, which is easy to writ
 `git status`. `scripts/wsl_clone_check.sh` now fails the gate if an ignore rule hides any source file, if any
 module under `python/` cannot be imported from a clean clone of committed HEAD, or if the built wheel omits a
 package - so this class of mistake is caught by a command rather than by a reader.
+
+## D028 - a checkpoint has to carry the run's position, not just its weights
+
+Resuming used to restore the model, the optimizers and the scaler, and nothing else. Three separate
+consequences followed from that, all silent:
+
+1. `data = cycle(batcher)` always started at batch 0, so every Colab or Kaggle disconnect re-trained on the
+   first batches of the shuffle. A run that resumed five times had seen those batches six times.
+2. `best_val` reset to `inf`, so the first post-resume eval wrote `best.pt` unconditionally - usually with a
+   worse model than the one it replaced.
+3. `scale_lr` stored its peak learning rate inside each param group, which is exactly the part that
+   `Optimizer.state_dict()` serialises. A resumed run therefore re-adopted the old peak and ignored the config
+   or `--lr` it was started with.
+
+Now the checkpoint's `cfg` carries `best_val` and `start_batch`, `ShardBatcher.batches(start_batch)` and
+`resume_cursor` place a fresh iterator where the dead one stopped, and the peaks are captured from the config
+**before** `load_checkpoint` and passed explicitly to `scale_lr`.
+
+The acceptance test is not a unit test: `scripts/wsl_resume_equiv.sh` (`just wsl-resume`) trains 8 steps
+uninterrupted, then runs the same command, sends SIGTERM once `step-000004.pt` exists, resumes, and requires
+every loss to match and `best.pt` to hold the same step and value. The first version of that script trained the
+short leg with `--steps 4`, which changes `warmup_steps = total_steps // 4` and made the two curves differ for
+a reason that had nothing to do with resume; both legs must request the same `total_steps`.
+
+## D029 - sampling, split shape and tokenizer inputs are all explicit
+
+`keep_top_p` subtracted the sorted **logits** from a cumulative **probability** and scattered the survivors
+back into the sorted buffer instead of the original layout. At p=0.5 on a mixed-sign row it kept 5 of 8 tokens
+where the nucleus is 1, and on an all-negative row it masked everything and fell back to greedy without
+saying so. It now compares probabilities to probabilities, scatters into `torch.full_like(logits, -inf)`, and
+rejects `p <= 0` instead of returning an all-masked row. `tests/test_generation_sampling.py` checks the kept
+set against an independent nucleus implementation and asserts the surviving logits stay in their own columns.
+
+The file-level val stride needs roughly `1 / val_ratio` files to hit its target; with 2 files and
+`val_ratio=0.005` it silently produced a 50% val split. `split_files` now raises when the achieved fraction
+exceeds 3x the request and says how many files the ratio needs, and `prepare` reports `val_fraction`.
+
+Document boundaries were blank lines, hard-coded, so a paragraph-formatted corpus emitted one `<eos>` per
+paragraph. `--doc-sep` now selects `blank`, `line`, `file`, or a literal separator string that is stripped.
+
+`prepare --tokenizer-corpus DIR` refuses to pack when any val-split file appears in the directory the BPE
+merges were trained on. A tokenizer trained across the split leaks vocabulary into the evaluation set, which
+no parity test can see.
+
+## D030 - one Rust pin, read from rust-toolchain.toml
+
+`setup_colab.sh` defaulted to `1.85.0` while `rust-toolchain.toml` pinned `1.99.1`. The code uses
+`usize::is_multiple_of`, which is still unstable on 1.85 (`unsigned_is_multiple_of`, tracking issue 128101),
+and `rustc +1.85.0` fails with `error[E0658]` on it - verified on this machine, not inferred. Two pins that
+disagree mean the Colab lane either fails to build or silently builds with a third version. The setup script
+now reads the channel out of `rust-toolchain.toml`, with `BRAINLAB_RUST_TOOLCHAIN` still overriding it.
+
+## D031 - CI runs the whole gate on a fresh checkout
+
+`.github/workflows/ci.yml` installs CPU torch, generates the goldens, runs fmt, `clippy -D warnings`,
+`cargo test --workspace --release` and `pytest`. Two reasons: the repository is a set of cross-language
+parity claims, and a push from this machine cannot assume the local tree is representative - the working tree
+lost its `.git` directory once during development. Tests that need golden tensors now skip with a message that
+names `just golden` instead of failing with `FileNotFoundError`: the index is committed, the 540 MB of tensors
+are not, so a fresh clone is a legitimate place to run the non-tensor tests.

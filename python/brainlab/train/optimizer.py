@@ -73,7 +73,8 @@ class Muon(Optimizer):
                 buffer.copy_(torch.where(finite, buffer, torch.zeros_like(buffer)))
                 scale = max(1.0, p.size(0) / p.size(1)) ** 0.5
                 lr = group["lr"]
-                p.mul_(1.0 - lr * group["weight_decay"])
+                one = torch.ones((), device=p.device, dtype=p.dtype)
+                p.mul_(torch.where(finite, one - lr * group["weight_decay"], one))
                 p.add_(torch.where(finite, update, torch.zeros_like(update)).reshape(p.shape), alpha=-lr * scale)
         return loss
 
@@ -162,16 +163,20 @@ def load_optimizers_state(optims: Sequence[Optimizer], states: Sequence[dict[str
         optim.load_state_dict(state)
 
 
-def scale_lr(optims: Sequence[Optimizer], factor: float) -> dict[str, float]:
+def peak_lrs(optims: Sequence[Optimizer]) -> list[list[float]]:
+    return [[float(group["lr"]) for group in optim.param_groups] for optim in optims]
+
+
+def scale_lr(optims: Sequence[Optimizer], factor: float, peaks: Sequence[Sequence[float]]) -> dict[str, float]:
     if factor < 0:
         raise ValueError("lr factor must be non-negative")
+    if len(peaks) != len(optims):
+        raise ValueError(f"{len(peaks)} peak schedules for {len(optims)} optimizers")
     applied: dict[str, float] = {}
-    for index, optim in enumerate(optims):
-        for group in optim.param_groups:
-            peak = group.get("brainlab_peak_lr")
-            if peak is None:
-                peak = group["lr"]
-                group["brainlab_peak_lr"] = peak
+    for index, (optim, group_peaks) in enumerate(zip(optims, peaks, strict=True)):
+        if len(group_peaks) != len(optim.param_groups):
+            raise ValueError(f"optimizer {index} gained or lost a parameter group")
+        for group, peak in zip(optim.param_groups, group_peaks, strict=True):
             group["lr"] = peak * factor
             applied[f"optim{index}"] = group["lr"]
     return applied

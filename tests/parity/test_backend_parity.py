@@ -30,13 +30,16 @@ def workload_for(key: str) -> Workload:
 
 
 @pytest.fixture(scope="module")
-def golden_root() -> Path:
-    directory = repo_root() / "tests" / "golden"
-    if not (directory / "index.json").is_file():
-        pytest.skip(f"{directory / 'index.json'} missing; run `just golden`")
-    if not (directory / "raw").is_dir():
-        pytest.skip(f"{directory / 'raw'} missing; run `just golden -- --model --raw`")
-    return directory
+def golden_root(golden_dir: Path) -> Path:
+    from tests.conftest import missing_goldens
+
+    missing = missing_goldens(golden_dir, include_raw=True)
+    if missing:
+        pytest.skip(
+            f"{len(missing)} golden files are missing, for example {missing[0]}; "
+            "run `just golden -- --model --raw`"
+        )
+    return golden_dir
 
 
 def harness_row(backend_name: str, workload: Workload, golden_root: Path, tmp_path: Path) -> dict[str, Any]:

@@ -6,7 +6,14 @@ import time
 from collections.abc import Sequence
 from pathlib import Path
 
-from brainlab.data.corpus import documents_from_text, read_text_dir, split_files, synthetic_docs, val_stride
+from brainlab.data.corpus import (
+    documents_from_text,
+    read_text_dir,
+    split_files,
+    synthetic_docs,
+    text_file_paths,
+    val_stride,
+)
 from brainlab.data.pack import PackConfig, pack_stream, split_shards, write_shards
 from brainlab.spec.config import load_raw_config
 from brainlab.tok.reference import BYTE_TOKENS, Tokenizer
@@ -42,15 +49,26 @@ def prepare(
     cfg: PackConfig,
     val_ratio: float,
     engine: str = "auto",
+    doc_sep: str = "blank",
+    tokenizer_corpus: Path | None = None,
 ) -> dict[str, object]:
     started = time.time()
 
     def documents(items: Sequence[tuple[str, str]]) -> list[str]:
-        return [doc for _, text in items for doc in documents_from_text(text)]
+        return [doc for _, text in items for doc in documents_from_text(text, doc_sep=doc_sep)]
 
     train_files, val_files = split_files(files, val_ratio)
     train_names = [name for name, _ in train_files]
     val_names = [name for name, _ in val_files]
+    trained_on: set[str] = set()
+    if tokenizer_corpus is not None:
+        trained_on = {name for name, _ in text_file_paths(tokenizer_corpus)}
+        overlap = sorted(set(val_names) & trained_on)
+        if overlap:
+            raise SystemExit(
+                f"the tokenizer was trained on {len(overlap)} of the {len(val_names)} val files "
+                f"(for example {overlap[:3]}); train it on the train split only"
+            )
     train_docs, used_engine = encode_docs(tokenizer, documents(train_files), engine)
     val_docs, _ = encode_docs(tokenizer, documents(val_files), engine)
     if not train_docs or not val_docs:
@@ -68,6 +86,9 @@ def prepare(
         "train_files": len(train_names),
         "val_files": len(val_names),
         "val_stride": val_stride(val_ratio) if val_ratio > 0 else None,
+        "val_fraction": round(len(val_names) / len(files), 4) if files else 0.0,
+        "doc_sep": doc_sep,
+        "tokenizer_corpus": str(tokenizer_corpus) if tokenizer_corpus else None,
         "train_documents": len(train_docs),
         "val_documents": len(val_docs),
         "tokens_train": int(train_stream.size),
@@ -94,6 +115,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--shard-tokens", type=int, default=None)
     parser.add_argument("--val-ratio", type=float, default=None)
     parser.add_argument("--engine", choices=("auto", "rust", "python"), default="auto")
+    parser.add_argument("--doc-sep", default="blank", help="blank | line | file, or a literal document separator string")
+    parser.add_argument("--tokenizer-corpus", type=Path, default=None,
+                        help="corpus the BPE merges were trained on; errors out if it contains val files")
     parser.add_argument("--seed", type=int, default=None)
     args = parser.parse_args(argv)
 
@@ -126,7 +150,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         shard_tokens=shard_tokens if shard_tokens % seq_len == 0 else (shard_tokens // seq_len) * seq_len,
         eos_id=tokenizer.eos_id,
     )
-    report = prepare(files, tokenizer, args.out, cfg, val_ratio, args.engine)
+    report = prepare(files, tokenizer, args.out, cfg, val_ratio, args.engine, args.doc_sep, args.tokenizer_corpus)
     report["tokenizer_vocab"] = tokenizer.vocab_size
     report["corpus_words"] = sum(len(text.split()) for _, text in files)
     (args.out / "prepare_report.json").parent.mkdir(parents=True, exist_ok=True)

@@ -50,6 +50,17 @@ def measure(
     }
 
 
+@torch.no_grad()
+def head_dtype(model: torch.nn.Module, batcher: ShardBatcher, device: torch.device, amp: bool) -> str:
+    for x, y in batcher:
+        ids = torch.from_numpy(np.ascontiguousarray(x)).to(device)
+        targets = torch.from_numpy(np.ascontiguousarray(y)).to(device)
+        with torch.autocast(device_type=device.type, enabled=amp, dtype=torch.float16):
+            logits, _ = model(ids, targets)
+        return str(logits.dtype)
+    return "no batches"
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="brainlab-ppl")
     parser.add_argument("--model", type=Path, required=True, help="safetensors checkpoint")
@@ -58,23 +69,30 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--batch", type=int, default=4)
     parser.add_argument("--batches", type=int, default=None)
     parser.add_argument("--seq-len", type=int, default=None)
+    parser.add_argument("--amp", action="store_true", help="score under fp16 autocast, as training does on a T4")
     parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
 
     configure_stdout()
     device = torch.device("cuda" if args.device == "auto" and torch.cuda.is_available() else "cpu") if args.device == "auto" else torch.device(args.device)
+    amp = args.amp
+    if amp and device.type != "cuda":
+        print("fp16 autocast needs CUDA; scoring in fp32", flush=True)
+        amp = False
     spec = load_model_spec()
     raw = load_raw_config()
     model = load_model(args.model, device=str(device), dtype=torch.float32, spec=spec)
     seq_len = args.seq_len or int(raw["batch"]["seq_len"])
     shards = TokenShards(args.data_dir, seq_len)
     batcher = ShardBatcher(shards, min(args.batch, len(shards)) or 1, shuffle_seed=None)
-    result = measure(model, batcher, device, args.batches, amp=False)
+    dtype = head_dtype(model, ShardBatcher(shards, 1, shuffle_seed=None), device, amp)
+    result = measure(model, batcher, device, args.batches, amp=amp)
     if args.json:
-        print(json.dumps(result, sort_keys=True))
+        print(json.dumps({**result, "logits_dtype": dtype}, sort_keys=True))
     else:
         print(f"loss {result['loss']:.4f}  ppl {result['perplexity']:.2f}  bits/token {result['bits_per_token']:.4f}")
         print(f"{int(result['tokens']):,} tokens over {int(result['batches'])} batches on {device}")
+        print(f"logits dtype under amp={amp}: {dtype}")
     return 0
 
 

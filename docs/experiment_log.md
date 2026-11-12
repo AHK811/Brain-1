@@ -426,3 +426,62 @@ span wider than a sequence exits 1 instead of reporting a vacuous clean, and the
 propagates. Verified against `42b5167`: 63 passed / 7 skipped, 19 cargo tests, clippy clean under
 `-D warnings`, 0 warning lines in `logs/clippy.log`, no `.py` file anywhere under `python/` ignored, and the
 attention entries in `tests/golden/index.json` carrying the triangle counts (537,919,488 for 2x8x512x64).
+
+---
+
+## 2026-11-12 - resume, sampling and two pins that disagreed
+
+**Host:** Windows 11 (10.0.26200) with the WSL2 lane; torch 2.15.0+cpu, numpy 2.5.4, rust 1.99.1. A second
+review pass this time brought its own measurements, and every item was re-verified against this tree before
+being changed.
+
+**A resumed run replayed its own data.** `data = cycle(batcher)` always rebuilt the iterator from batch 0, and
+nothing in the checkpoint said where the dead run had stopped, so every disconnect re-trained on the same first
+batches. `best_val` restarted at `inf`, so the first post-resume eval overwrote `best.pt` with whatever it
+liked. And because `scale_lr` parked its peak learning rate inside the param groups, the resumed run adopted
+the *saved* peak and ignored the config it was started with. All three are fixed by treating the run's position
+as part of the checkpoint contract (D028).
+
+The proof is `scripts/wsl_resume_equiv.sh`: 8 steps uninterrupted versus the same command SIGTERMed once
+`step-000004.pt` lands and then resumed. **Every loss matched to 0.000e+00** (9.706694, 9.464235, 7.685923,
+9.208424, 7.279160, 7.032156, 6.637837, 6.372206), the resume line reported the restored
+`best select loss 6.9201` rather than `inf`, and both runs ended with the same `best.pt` (step 8, val loss
+5.938721). The first attempt at that script compared `--steps 4` against `--steps 8` and reported a 0.287
+difference, which was the script's own bug: `warmup_steps = total_steps // 4`, so the short leg ran a
+different schedule. A kill-and-resume test has to request the same total.
+
+**Nucleus sampling was not sampling from a nucleus.** `keep_top_p` subtracted sorted *logits* from a
+cumulative *probability*, then scattered the survivors back into the sorted buffer rather than the original
+layout. Reproduced on this tree: at p=0.5 over 8 tokens the old code kept **5**, the correct nucleus is **1**.
+On an all-negative row the subtraction made every entry look removable, so generation silently degraded to
+greedy - in the tool used to judge the model. Fixed, with `tests/test_generation_sampling.py` comparing
+against an independent nucleus implementation.
+
+**The Rust pins contradicted each other, and the contradiction breaks the GPU lane.** `setup_colab.sh`
+defaulted to 1.85.0 while `rust-toolchain.toml` pinned 1.99.1, and the code calls `usize::is_multiple_of`.
+Installing 1.85.0 and compiling a two-line probe gave
+`error[E0658]: use of unstable library feature 'unsigned_is_multiple_of'` - so a fresh Colab cell would have
+failed the build, not merely warned. One pin now, read from `rust-toolchain.toml`.
+
+**A fresh clone failed 16 tests instead of skipping them.** `index.json` is committed, the tensors it points
+at are not, and both fixtures checked only for the index or the `raw/` directory. They now verify the listed
+files exist: the same clone went from 16 failed / 51 passed to **0 failed / 51 passed / 19 skipped**, each skip
+naming `just golden`. Getting this right needed one correction of its own - requiring raw bundles for every
+record skipped five passing tests, because forward goldens are safetensors-only by design and never have a
+`.bin` bridge. Added `.github/workflows/ci.yml`, which regenerates the goldens and
+runs fmt, clippy `-D warnings`, `cargo test --workspace --release` and pytest on every push: a repo whose whole
+claim is cross-language parity should not depend on one machine that has already lost its `.git` once.
+
+**Smaller things that were still wrong.** `epoch` was computed as `step / len(batcher)` while a step consumes
+`accum` batches, so it ran 4x slow; Muon applied decoupled weight decay even when it discarded the update as
+non-finite, shrinking a parameter it had refused to move; `split_files` let 2 files become a 50% val split for
+a requested 0.5% (D029 now refuses that); `just gen` hard-coded `--charlevel`, decoding BPE ids as bytes;
+`--device cuda` in `generate.py` selected CPU; and `prepare` had no way to say whether the tokenizer had been
+trained on val files, which it now refuses.
+
+**Not verified, deliberately.** The claim that the tied output projection is not really fp32 under autocast
+was read from the code and not measured: this host has no CUDA device, and an fp32 head costs roughly 30% more
+step time. It is a preflight item on the T4, not a change - measure validation loss with `logits.dtype`
+recorded at fp16 and fp32 and only switch if the gap exceeds about 0.002 nats. The `residual_scale_layers`
+field still equals `n_layers`; it is a separate knob by design, and touching it now would move the
+initialisation and invalidate the committed goldens.

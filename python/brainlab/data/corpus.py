@@ -52,19 +52,32 @@ def synthetic_docs(total_tokens: int, seed: int = 0, doc_sentences: tuple[int, i
     return docs
 
 
-def documents_from_text(text: str, min_chars: int = 1) -> list[str]:
-    blocks = re.split(r"\n[ \t\r\n\v\f]*\n", text)
+DOC_SEPS = ("blank", "line", "file")
+
+
+def documents_from_text(text: str, min_chars: int = 1, doc_sep: str = "blank") -> list[str]:
+    if doc_sep == "file":
+        blocks: list[str] = [text]
+    elif doc_sep == "line":
+        blocks = text.splitlines()
+    elif doc_sep == "blank":
+        blocks = re.split(r"\n[ \t\r\n\v\f]*\n", text)
+    else:
+        blocks = text.split(doc_sep)
     return [block.strip() for block in blocks if len(block.strip()) >= max(min_chars, 1)]
 
 
 def read_text_dir(root: Path, suffixes: Sequence[str] = (".txt",)) -> list[tuple[str, str]]:
-    root = Path(root)
-    files = sorted((p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in suffixes), key=lambda p: str(p))
     out = []
-    for path in files:
-        rel = path.relative_to(root).as_posix()
-        out.append((rel, path.read_text(encoding="utf-8", errors="replace")))
+    for name, path in text_file_paths(root, suffixes):
+        out.append((name, path.read_text(encoding="utf-8", errors="replace")))
     return out
+
+
+def text_file_paths(root: Path, suffixes: Sequence[str] = (".txt",)) -> list[tuple[str, Path]]:
+    root = Path(root)
+    paths = sorted((p for p in root.rglob("*") if p.is_file() and p.suffix.lower() in suffixes), key=str)
+    return [(path.relative_to(root).as_posix(), path) for path in paths]
 
 
 def val_stride(val_ratio: float) -> int:
@@ -81,11 +94,19 @@ def split_files(files: Iterable[tuple[str, str]], val_ratio: float) -> tuple[lis
         raise ValueError(f"val_ratio must be in [0,1), got {val_ratio}")
     stride = val_stride(val_ratio)
     val_idx = {index for index in range(len(ordered)) if stride != NO_VAL and index % stride == 0}
-    train = [item for index, item in enumerate(ordered) if index not in val_idx]
-    val = [item for index, item in enumerate(ordered) if index in val_idx]
-    if not train or (val_ratio > 0 and len(ordered) > 1 and not val):
-        raise ValueError(f"split produced train={len(train)} val={len(val)} from {len(ordered)} files")
-    return train, val
+    train_files = [item for index, item in enumerate(ordered) if index not in val_idx]
+    val_files = [item for index, item in enumerate(ordered) if index in val_idx]
+    if not train_files or (val_ratio > 0 and len(ordered) > 1 and not val_files):
+        raise ValueError(f"split produced train={len(train_files)} val={len(val_files)} from {len(ordered)} files")
+    if val_ratio > 0 and len(ordered) > 1:
+        achieved = len(val_files) / len(ordered)
+        if achieved > 3.0 * val_ratio:
+            raise ValueError(
+                f"{len(ordered)} files give {achieved:.1%} val, wanted {val_ratio:.1%}; "
+                f"a file-level stride needs at least {math.ceil(1.0 / val_ratio)} files, "
+                f"so shard the corpus into more files or accept the larger split explicitly"
+            )
+    return train_files, val_files
 
 
 def stable_token_count(texts: Iterable[str]) -> int:

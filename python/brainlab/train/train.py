@@ -19,7 +19,7 @@ from brainlab.export.to_safetensors import save_model
 from brainlab.model.gpt import TransformerLM
 from brainlab.spec.config import load_model_spec, load_raw_config
 from brainlab.train.checkpoint import latest_checkpoint, load_checkpoint, rotate, save_checkpoint
-from brainlab.train.optimizer import build_optimizers, scale_lr
+from brainlab.train.optimizer import build_optimizers, peak_lrs, scale_lr
 from brainlab.train.schedule import LRSchedule, tokens_per_step
 from brainlab.util import configure_stdout
 
@@ -76,9 +76,17 @@ def git_state() -> str:
     return rev + ("+dirty" if dirty else "")
 
 
-def cycle(batcher: ShardBatcher) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+def resume_cursor(batches_done: int, batches_per_epoch: int) -> tuple[int, int]:
+    if batches_done < 0 or batches_per_epoch < 1:
+        raise ValueError(f"cannot place batch {batches_done} in an epoch of {batches_per_epoch}")
+    return batches_done // batches_per_epoch, batches_done % batches_per_epoch
+
+
+def cycle(batcher: ShardBatcher, start_batch: int = 0) -> Iterator[tuple[np.ndarray, np.ndarray]]:
+    batcher.epoch, position = resume_cursor(start_batch, max(len(batcher), 1))
     while True:
-        yield from batcher
+        yield from batcher.batches(position)
+        position = 0
 
 
 def evaluate(
@@ -214,6 +222,9 @@ def train(argv: Sequence[str] | None = None) -> int:
     )
 
     start_step = 0
+    best_val = float("inf")
+    start_batch = 0
+    peaks = peak_lrs(optims)
     if args.resume:
         path = args.resume
     elif args.dry_run:
@@ -223,7 +234,10 @@ def train(argv: Sequence[str] | None = None) -> int:
     if path is not None and path.is_file():
         _, meta = load_checkpoint(path, model, optims, scaler, map_location=str(device))
         start_step = int(meta["step"])
-        print(f"resumed {path} at step {start_step}", flush=True)
+        resumed = meta.get("cfg", {})
+        best_val = float(resumed.get("best_val", float("inf")))
+        start_batch = int(resumed.get("start_batch", start_step * accum))
+        print(f"resumed {path} at step {start_step}, best select loss {best_val:.4f}, batch {start_batch}", flush=True)
 
     args.out.mkdir(parents=True, exist_ok=True)
     log_path = args.out / "train_log.jsonl"
@@ -242,6 +256,10 @@ def train(argv: Sequence[str] | None = None) -> int:
         "warmup_steps": warmup_steps,
         "peak_lr": peak_reference,
         "seed": seed,
+        "resumed_from": str(path) if path is not None and path.is_file() else None,
+        "start_step": start_step,
+        "start_batch": start_batch,
+        "peak_lrs": peaks,
         "torch": torch.__version__,
         "train_sequences": len(train_shards),
         "val_sequences": len(val_shards),
@@ -258,14 +276,13 @@ def train(argv: Sequence[str] | None = None) -> int:
     if args.dry_run:
         return 0
 
-    data = cycle(batcher)
+    data = cycle(batcher, start_batch)
     step = start_step
     tokens_seen = step * header["tokens_per_step"]
-    best_val = float("inf")
     window_start = time.perf_counter()
     window_tokens = 0
     ema_loss: float | None = None
-    batches_in_epoch = max(len(batcher), 1)
+    batches_in_epoch = max(len(batcher) * accum, 1)
     consecutive_skips = 0
     zero_grad_streak = 0
     muon_skips = 0
@@ -273,8 +290,11 @@ def train(argv: Sequence[str] | None = None) -> int:
     zero_grad_limit = int(sched_cfg["max_consecutive_zero_grads"])
     scale_floor = float(sched_cfg["scale_floor"])
 
+    def checkpoint_cfg(completed: int) -> dict[str, object]:
+        return {"seed": seed, "best_val": best_val, "start_batch": completed * accum}
+
     while step < total_steps:
-        scale_lr(optims, schedule.factor_at(step))
+        scale_lr(optims, schedule.factor_at(step), peaks)
         accumulated = torch.zeros((), device=device)
         for _ in range(accum):
             x, y = next(data)
@@ -347,7 +367,7 @@ def train(argv: Sequence[str] | None = None) -> int:
             scale_floor=scale_floor,
         )
         if reason:
-            path = save_checkpoint(args.out / f"diverged-{step:06d}.pt", model, step, optims, scaler, {"seed": seed})
+            path = save_checkpoint(args.out / f"diverged-{step:06d}.pt", model, step, optims, scaler, checkpoint_cfg(step))
             print(f"diverged at step {step}: {reason} -> {path}", flush=True)
             return 1
 
@@ -366,15 +386,15 @@ def train(argv: Sequence[str] | None = None) -> int:
 
             if candidate["val_loss"] < best_val:
                 best_val = candidate["val_loss"]
-                save_checkpoint(args.out / "best.pt", model, step, optims, scaler, {"seed": seed}, candidate)
+                save_checkpoint(args.out / "best.pt", model, step, optims, scaler, checkpoint_cfg(step), candidate)
 
         if step % save_every == 0:
-            path = save_checkpoint(args.out / f"step-{step:06d}.pt", model, step, optims, scaler, {"seed": seed})
+            path = save_checkpoint(args.out / f"step-{step:06d}.pt", model, step, optims, scaler, checkpoint_cfg(step))
             removed = rotate(args.out, args.keep)
             if removed:
                 print(f"rotated out {[str(p.name) for p in removed]}", flush=True)
 
-    final = save_checkpoint(args.out / "last.pt", model, step, optims, scaler, {"seed": seed})
+    final = save_checkpoint(args.out / "last.pt", model, step, optims, scaler, checkpoint_cfg(step))
     exported = save_model(model, args.out / f"{spec.name}.safetensors", dtype=torch.float32)
     print(
         f"trained {step} steps, {tokens_seen:,} tokens, best select loss {best_val:.4f} -> {final}, {exported}",

@@ -23,13 +23,15 @@ def keep_top_k(logits: torch.Tensor, k: int) -> torch.Tensor:
 
 
 def keep_top_p(logits: torch.Tensor, p: float) -> torch.Tensor:
-    if p >= 1.0:
+    if not 0.0 < p <= 1.0:
+        raise ValueError(f"top_p must be in (0,1], got {p}")
+    if p == 1.0:
         return logits
     sorted_values, sorted_indices = logits.sort(dim=-1, descending=True)
-    cumulative = sorted_values.softmax(dim=-1).cumsum(dim=-1)
-    remove = (cumulative - sorted_values) >= p
+    probabilities = sorted_values.softmax(dim=-1)
+    remove = (probabilities.cumsum(dim=-1) - probabilities) >= p
     kept = sorted_values.masked_fill(remove, float("-inf"))
-    return kept.scatter(-1, sorted_indices, kept)
+    return torch.full_like(logits, float("-inf")).scatter(-1, sorted_indices, kept)
 
 
 @torch.no_grad()
@@ -95,7 +97,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     configure_stdout()
-    device = torch.device("cuda" if args.device == "auto" and torch.cuda.is_available() else "cpu")
+    if args.device == "auto":
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device(args.device)
+        if device.type == "cuda" and not torch.cuda.is_available():
+            raise SystemExit("--device cuda requested but CUDA is unavailable")
     tokenizer: Tokenizer
     if args.tokenizer_dir:
         tokenizer = Tokenizer.load(args.tokenizer_dir)

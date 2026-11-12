@@ -39,9 +39,15 @@ shard, a reader may gather across shard boundaries; it must never drop a window 
 
 ## Document splitting
 
-A corpus file is split into documents at `\n` + one or more ASCII whitespace (`space \t \n \r \v \f`) +
-`\n`, taking the **last** newline of the run as the boundary. Each document is trimmed of leading and
-trailing whitespace; empty documents are dropped. All characters inside one document are kept verbatim.
+`--doc-sep` chooses the boundary. The default, `blank`: a corpus file is split at `\n` + one or more ASCII
+whitespace (`space \t \n \r \v \f`) + `\n`, taking the **last** newline of the run as the boundary. Each
+document is trimmed of leading and trailing whitespace; empty documents are dropped. All characters inside one
+document are kept verbatim.
+
+`line` treats every line as a document, `file` treats the whole file as one document, and any other value is
+taken as a literal separator string that is split on and removed. A paragraph-formatted corpus read with the
+`blank` default emits one `eos` per paragraph, which is a data decision rather than a parsing detail - match
+the mode to how the corpus actually delimits documents and record it in `prepare_report.json` (`doc_sep`).
 
 ## File-level train/val split
 
@@ -51,6 +57,10 @@ otherwise **train**. `val_ratio = 0` means no val split at all. This is determin
 file contents, so re-running after adding one file only changes splits from that index onward; it also
 needs no shared RNG implementation between Python and Rust, which is the reason a seeded shuffle was
 rejected.
+
+The stride is only a good approximation once the corpus has about `1/val_ratio` files, so `split_files`
+refuses a corpus where the achieved fraction exceeds 3x the request (`val_ratio=0.005` over 2 files would
+otherwise silently produce a 50% val set) and `prepare_report.json` records `val_fraction`.
 
 ## Packing
 
