@@ -549,3 +549,13 @@ checkpoint: loss 6.9518, ppl 1045.06, 10.029 bits/token, `logits_dtype torch.flo
 **Observed while sampling.** `brainlab generate` warns `model head has 16384 rows, tokenizer has 258 tokens;
 ids above 257 are undecodable`, and 32 of 96 tokens in one sample were undecodable. Pairing the byte vocab with
 the spec-sized head leaves 16,126 rows that no training token can occupy.
+
+**The notebooks' provenance block was reading the wrong log, and its safety check was vacuous.** Comparing the
+two files in one checkpoint directory: `train.jsonl` (the captured stdout) holds 7 compact rows plus 1 pretty
+row, while `train_log.jsonl` holds 8 compact rows. The `'{"'` filter keeps the first seven and drops the header,
+so every provenance field printed `None` and the `if track_window and select_window:` guard skipped the
+track/select disjointness assertion entirely - it had been passing without testing anything since the cells
+were written, and the earlier simulated runs never noticed because the same empty-condition path was taken.
+Reading `train_log.jsonl` restores it: `git d60cef3f...+dirty`, `device cpu`, `dtype fp32`, `start_batch 0`,
+`eval_track_window [0, 8]`, `eval_select_window [8, 16]`, `val_sequences 132`, and the assertion now evaluates
+and passes on the ranges. See D034.

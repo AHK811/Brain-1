@@ -369,3 +369,26 @@ printing sizes and a clean `git status` rather than leaving that discovery to a 
 undertrained model emits undecodable ids (32 of 96 tokens in one sample) and perplexity starts near the
 16,384-way uniform floor. That is a property of pairing a byte vocab with the spec-sized head, not a bug in
 either; changing `vocab_size` would move the goldens, so it is recorded instead.
+
+## D034 - provenance is read from `train_log.jsonl`, not from captured stdout
+
+`python/brainlab/train/train.py:274` writes the config header twice in two different formats: compact into
+`<out>/train_log.jsonl`, and pretty-printed with `indent=2` to stdout. A pretty JSON object on stdout begins
+with a line containing only `{`, so the `line.startswith('{"')` filter that every consumer of the stdout log
+uses - the notebooks, `scripts/wsl_overfit_check.sh` - silently drops the header while keeping every train and
+eval row.
+
+Both analysis cells therefore printed `None` for `git`, `device`, `dtype`, `resumed_from`, `start_batch`,
+`peak_lrs` and both eval windows, and then skipped the track/select disjointness check because it was guarded
+by `if track_window and select_window:`. The guard that exists to catch selection on the reporting window
+passed vacuously. That is the worst kind of green: an assertion that cannot fail is worse than no assertion,
+because it advertises a check nobody performed.
+
+The cells now read `train_log.jsonl` first, take the **last** config header so a resumed directory reports the
+run that is currently in flight, raise if no header exists at all, and raise if the header carries no eval
+windows. Verified: 7-8 compact rows recovered, `git d60cef3...+dirty`, `eval_track_window [0, 8]`,
+`eval_select_window [8, 16]`, disjointness asserted rather than assumed.
+
+The footgun itself is in `train.py`, and removing it means changing the stdout format that the overfit and
+resume scripts parse, so it is left alone here and recorded as a one-line follow-up: emit the header to stdout
+in the same compact form the log uses, and let the pretty copy be a human convenience behind a flag.
