@@ -100,3 +100,4 @@ recomputes the same stream from `corpus/` and must match the Rust `.bin` byte fo
 compared field by field. Regenerate the Rust side with `just datapack-fixture`; the inputs themselves come
 from `python -m brainlab.tok.parity_fixture --datapack tests/golden/datapack_fixture`.
 
+
