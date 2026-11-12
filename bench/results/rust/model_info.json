@@ -1,0 +1,33 @@
+{
+  "backend": "rust_cpu",
+  "file_bytes": 133210104,
+  "metadata": {
+    "brainlab.config_json": "{\"name\":\"brainlab-33m\",\"d_model\":512,\"n_layers\":8,\"n_heads\":8,\"head_dim\":64,\"vocab_size\":16384,\"context_len\":1024,\"mlp_hidden\":1344,\"rms_norm_eps\":1e-06,\"rope_theta\":10000.0,\"dropout\":0.0,\"tie_embeddings\":true,\"qkv_fused\":true,\"init_std\":0.028,\"residual_scale_layers\":8,\"param_budget\":33000000,\"param_tolerance\":0.02}",
+    "brainlab.name": "brainlab-33m",
+    "brainlab.param_count": "33300992",
+    "brainlab.producer_versions": "{\"torch\":\"2.13.0+cpu\",\"safetensors\":\"0.8.0\"}",
+    "brainlab.source": "python/brainlab/export/to_safetensors.py",
+    "brainlab.spec_version": "1"
+  },
+  "param_count": 33300992,
+  "spec": {
+    "context_len": 1024,
+    "d_model": 512,
+    "dropout": 0.0,
+    "head_dim": 64,
+    "init_std": 0.02800000086426735,
+    "mlp_hidden": 1344,
+    "n_heads": 8,
+    "n_layers": 8,
+    "name": "brainlab-33m",
+    "param_budget": 33000000,
+    "param_tolerance": 0.019999999552965164,
+    "qkv_fused": true,
+    "residual_scale_layers": 8,
+    "rms_norm_eps": 9.999999974752427e-7,
+    "rope_theta": 10000.0,
+    "tie_embeddings": true,
+    "vocab_size": 16384
+  },
+  "tensors": 58
+}

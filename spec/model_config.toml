@@ -1,0 +1,77 @@
+[model]
+name = "brainlab-33m"
+d_model = 512
+n_layers = 8
+n_heads = 8
+head_dim = 64
+vocab_size = 16384
+context_len = 1024
+mlp_hidden = 1344
+rms_norm_eps = 1e-6
+rope_theta = 10000.0
+dropout = 0.0
+tie_embeddings = true
+qkv_fused = true
+init_std = 0.028
+residual_scale_layers = 8
+param_budget = 33000000
+param_tolerance = 0.02
+
+[precision]
+compute = "float16"
+master = "float32"
+grad_scaler = true
+reason = "T4 (sm_75) has no native bfloat16 tensor cores"
+
+[optimizer.muon]
+lr = 0.02
+momentum = 0.95
+ns_steps = 5
+weight_decay = 0.1
+
+[optimizer.adamw]
+lr = 3e-4
+betas = [0.9, 0.95]
+weight_decay = 0.1
+eps = 1e-8
+
+[schedule]
+seed = 0
+warmup_steps = 200
+total_steps = 8000
+min_lr_fraction = 0.1
+decay = "cosine"
+grad_clip = 1.0
+max_consecutive_skips = 20
+max_consecutive_zero_grads = 3
+scale_floor = 1.0
+
+[batch]
+seq_len = 1024
+micro_batch = 8
+accum_steps = 4
+eval_every = 250
+eval_batches = 64
+log_every = 10
+
+[tokenizer]
+type = "byte-level-bpe"
+vocab_size = 16384
+byte_base_tokens = 256
+emit_unk = false
+max_word_bytes = 32
+pre_tokenizer = "whitespace-plus-punctuation-v1"
+dir = "data/tokenizer"
+
+[data]
+root = "data"
+train_shards = "data/packed/train"
+val_shards = "data/packed/val"
+token_dtype = "uint16"
+shard_tokens = 4194304
+val_ratio = 0.005
+pack_separator = "eos"
+
+[golden]
+dir = "tests/golden"
+seed = 1234

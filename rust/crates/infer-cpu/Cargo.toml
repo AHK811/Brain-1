@@ -1,0 +1,33 @@
+[package]
+name = "brainlab-infer-cpu"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+half.workspace = true
+memmap2.workspace = true
+rayon.workspace = true
+safetensors.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+brainlab-tokenizer = { workspace = true, optional = true }
+
+[features]
+default = ["tokenizer"]
+tokenizer = ["dep:brainlab-tokenizer"]
+profile = []
+
+[lib]
+name = "brainlab_infer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "brainlab"
+path = "src/bin/brainlab.rs"
+
+[[test]]
+name = "parity"
+path = "tests/parity.rs"

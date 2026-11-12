@@ -1,0 +1,21 @@
+{
+  "backend": "rust_cpu",
+  "cache_identical_to_full_path": true,
+  "context_len": 1024,
+  "decode_budget": 0.01,
+  "decode_matches_full_forward": true,
+  "decode_steps": 8,
+  "full_forward_ms": 452.509314,
+  "logits_scratch_bytes_avoided": 4128768,
+  "logits_scratch_floats_avoided": 1032192,
+  "param_count": 33300992,
+  "prefill_all_rows_ms": 320.64981,
+  "prefill_last_row_ms": 199.47800600000002,
+  "prefill_matches_full_forward": true,
+  "prefill_speedup": 1.6074444317435175,
+  "prefill_tokens": 64,
+  "vocab_size": 16384,
+  "worst_decode_abs_error": 1.5795230865478516e-6,
+  "worst_last_row_against_all_row_prefill": 4.76837158203125e-7,
+  "worst_last_row_against_full_forward": 4.76837158203125e-7
+}

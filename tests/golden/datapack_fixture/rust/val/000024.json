@@ -1,0 +1,13 @@
+{
+  "n_tokens": 48,
+  "seq_len": 16,
+  "dtype": "uint16",
+  "split": "val",
+  "byte_order": "little",
+  "row_major": true,
+  "source_files": [
+    "group-0/file-0.txt",
+    "group-2/file-4.txt"
+  ],
+  "sha256": "c77aaf7c2966c46542fae5ffec58411c274c5650ad12ddda231c81a1639d4a4a"
+}

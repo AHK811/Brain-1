@@ -1,0 +1,22 @@
+[package]
+name = "brainlab-datapack"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+brainlab-tokenizer.workspace = true
+
+[lib]
+name = "brainlab_datapack"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pack"
+path = "src/bin/pack.rs"

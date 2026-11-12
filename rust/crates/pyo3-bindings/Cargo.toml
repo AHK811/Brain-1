@@ -1,0 +1,20 @@
+[package]
+name = "brainlab-pyo3"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+pyo3.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+brainlab-datapack.workspace = true
+brainlab-infer-cpu.workspace = true
+brainlab-tokenizer.workspace = true
+
+[lib]
+name = "brainlab_rs"
+crate-type = ["cdylib", "rlib"]

@@ -1,0 +1,59 @@
+{
+  "__meta__": {
+    "brainlab.atol": "0.0001",
+    "brainlab.dtype": "fp32",
+    "brainlab.eps": "1e-06",
+    "brainlab.flops": "537919488.0",
+    "brainlab.key": "attention_fp32_2x8x512x64",
+    "brainlab.op": "attention",
+    "brainlab.rel_l2": "1e-05",
+    "brainlab.rtol": "0.0001",
+    "brainlab.seed": "1234",
+    "brainlab.shapes": "{\"q\":\"2x8x512x64\",\"k\":\"2x8x512x64\",\"v\":\"2x8x512x64\",\"y\":\"2x8x512x64\"}",
+    "brainlab.traffic_bytes": "8388608"
+  },
+  "k": {
+    "dtype": "fp32",
+    "file": "k.fp32.bin",
+    "nbytes": 2097152,
+    "shape": [
+      2,
+      8,
+      512,
+      64
+    ]
+  },
+  "q": {
+    "dtype": "fp32",
+    "file": "q.fp32.bin",
+    "nbytes": 2097152,
+    "shape": [
+      2,
+      8,
+      512,
+      64
+    ]
+  },
+  "v": {
+    "dtype": "fp32",
+    "file": "v.fp32.bin",
+    "nbytes": 2097152,
+    "shape": [
+      2,
+      8,
+      512,
+      64
+    ]
+  },
+  "y": {
+    "dtype": "fp32",
+    "file": "y.fp32.bin",
+    "nbytes": 2097152,
+    "shape": [
+      2,
+      8,
+      512,
+      64
+    ]
+  }
+}

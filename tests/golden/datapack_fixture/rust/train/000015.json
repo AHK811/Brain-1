@@ -1,0 +1,14 @@
+{
+  "n_tokens": 48,
+  "seq_len": 16,
+  "dtype": "uint16",
+  "split": "train",
+  "byte_order": "little",
+  "row_major": true,
+  "source_files": [
+    "group-0/file-1.txt",
+    "group-1/file-2.txt",
+    "group-1/file-3.txt"
+  ],
+  "sha256": "43ceaebc92b7ae1e474ca64860e68c381cd5be22befafa93b55f949ddc92483b"
+}

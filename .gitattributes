@@ -1,0 +1,13 @@
+* text=auto
+*.sh text eol=lf
+*.py text eol=lf
+*.rs text eol=lf
+*.toml text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+justfile text eol=lf
+*.gitattributes text eol=lf
+*.bin binary
+*.safetensors binary
+*.npy binary
+*.npz binary

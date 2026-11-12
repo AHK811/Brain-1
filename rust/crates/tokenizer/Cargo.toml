@@ -1,0 +1,24 @@
+[package]
+name = "brainlab-tokenizer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+rayon.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+[lib]
+name = "brainlab_tokenizer"
+path = "src/lib.rs"
+
+[[bin]]
+name = "train-bpe"
+path = "src/bin/train_bpe.rs"
+
+[[bin]]
+name = "tokctl"
+path = "src/bin/tokctl.rs"

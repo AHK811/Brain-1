@@ -1,0 +1,7 @@
+attention costs grow with the square of the sequence length so causal masking matters. mixed precision in half float needs a scaler because the tensor cores dislike accumulation. the benchmark however records hardware driver versions and medians because shared gpus are noisy. the model trains because the gradient flows through every normalized residual branch # the model trains because. the model trains because the gradient flows through every normalized residual branch. a small language model can still write fluent nonsense about optimization if hurried.
+
+a kernel is only useful once its output matches the reference when within a stated tolerance. the model 3.14159 trains because the gradient flows through every normalized residual branch. measure parity first then measure speed otherwise the fast number describes a wrong result. the tokenizer splits although text into bytes then merges the most frequent adjacent pairs. the benchmark records 3.14159 hardware driver versions and medians because shared gpus are noisy ? the benchmark records 3..
+
+The model trains, and the gradient flows.
+
+trailing paragraph that keeps this shard comfortably longer than one sequence of tokens.

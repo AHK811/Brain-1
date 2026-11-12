@@ -1,0 +1,111 @@
+    Finished `release` profile [optimized + debuginfo] target(s) in 3.48s
+     Running unittests src/lib.rs (/home/ak_brother_811/brainlab-target/release/deps/brainlab_datapack-69932e766db87094)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/pack.rs (/home/ak_brother_811/brainlab-target/release/deps/pack-fcae99534a38d880)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ak_brother_811/brainlab-target/release/deps/brainlab_infer-3093e818563b2e11)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/brainlab.rs (/home/ak_brother_811/brainlab-target/release/deps/brainlab-bd9f1b1e7752d395)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/flops.rs (/home/ak_brother_811/brainlab-target/release/deps/flops-87806f3ea16c47c1)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/parity.rs (/home/ak_brother_811/brainlab-target/release/deps/parity-41759872bb94f4e2)
+
+running 12 tests
+test linear_equals_matmul ... ok
+test matmul_matches_golden ... ok
+test attention_matches_golden ... ok
+test rmsnorm_matches_golden ... ok
+test rope_matches_closed_form ... ok
+test cached_decode_matches_full_forward ... ok
+test sumsq_matches_naive ... ok
+test softmax_matches_golden ... ok
+test transpose_roundtrips ... ok
+test tiled_linear_matches_dot_linear_on_odd_shapes ... ok
+test prefill_last_row_matches_the_all_row_path ... ok
+test forward_matches_golden_when_model_present has been running for over 60 seconds
+test forward_matches_golden_when_model_present ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 100.07s
+
+     Running unittests src/lib.rs (/home/ak_brother_811/brainlab-target/release/deps/brainlab_rs-ea2f6d5fc27c8329)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/lib.rs (/home/ak_brother_811/brainlab-target/release/deps/brainlab_tokenizer-474aa823adc84452)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/tokctl.rs (/home/ak_brother_811/brainlab-target/release/deps/tokctl-6b04386ed7c89cf8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running unittests src/bin/train_bpe.rs (/home/ak_brother_811/brainlab-target/release/deps/train_bpe-14e77b0939b83b25)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/parity.rs (/home/ak_brother_811/brainlab-target/release/deps/parity-78d519c0db13c0bd)
+
+running 7 tests
+test class_rules_follow_the_spec ... ok
+test digit_runs_split_from_the_right_in_threes ... ok
+test decoder_roundtrips_every_fixture_document ... ok
+test binary_and_json_forms_agree ... ok
+test fixture_matches_python_encoder ... ok
+test fixture_matches_python_pretokenizer ... ok
+test fixture_matches_python_word_chunking ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+   Doc-tests brainlab_datapack
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.01s
+
+   Doc-tests brainlab_infer
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+   Doc-tests brainlab_rs
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+   Doc-tests brainlab_tokenizer
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+

@@ -1,0 +1,41 @@
+{
+  "__meta__": {
+    "brainlab.atol": "1e-05",
+    "brainlab.dtype": "fp32",
+    "brainlab.eps": "1e-06",
+    "brainlab.flops": "8388608.0",
+    "brainlab.key": "rmsnorm_fp32_4096x512",
+    "brainlab.op": "rmsnorm",
+    "brainlab.rel_l2": "1e-05",
+    "brainlab.rtol": "0.0001",
+    "brainlab.seed": "1234",
+    "brainlab.shapes": "{\"x\":\"4096x512\",\"w\":\"512\",\"y\":\"4096x512\"}",
+    "brainlab.traffic_bytes": "16779264"
+  },
+  "w": {
+    "dtype": "fp32",
+    "file": "w.fp32.bin",
+    "nbytes": 2048,
+    "shape": [
+      512
+    ]
+  },
+  "x": {
+    "dtype": "fp32",
+    "file": "x.fp32.bin",
+    "nbytes": 8388608,
+    "shape": [
+      4096,
+      512
+    ]
+  },
+  "y": {
+    "dtype": "fp32",
+    "file": "y.fp32.bin",
+    "nbytes": 8388608,
+    "shape": [
+      4096,
+      512
+    ]
+  }
+}

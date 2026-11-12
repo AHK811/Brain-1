@@ -1,0 +1,65 @@
+{
+  "backend": "rust_cpu",
+  "dtype": "fp32",
+  "golden_dtype": "fp32",
+  "hardware": {
+    "available_parallelism": 4,
+    "avx": true,
+    "avx2": true,
+    "backend": "rust_cpu",
+    "engine_version": "0.1.0",
+    "pointer_width": 64,
+    "rayon_threads": 4,
+    "threads_requested": 4
+  },
+  "key": "matmul_fp32_2048x512x512",
+  "op": "matmul",
+  "reps": 60,
+  "result": {
+    "baseline": {
+      "gflops": 8.95508707947112,
+      "kernel": "dot_fma",
+      "ms_median": 119.903002,
+      "parity": {
+        "atol": 0.001,
+        "elementwise_pass": true,
+        "max_abs_err": 2.9206275939941406e-6,
+        "parity_pass": true,
+        "rel_l2_err": 2.643817481438283e-7,
+        "rel_l2_limit": 0.00001,
+        "rel_pass": true,
+        "rtol": 0.0001
+      },
+      "summary": {
+        "ms_max": 548.6341110000001,
+        "ms_median": 119.903002,
+        "ms_min": 35.278801,
+        "ms_p90": 304.505717
+      }
+    },
+    "baseline_vs_tiled_max_abs": 1.1920928955078125e-6,
+    "gflops": 7.365205250198356,
+    "kernel": "block_4x2_tiled",
+    "ms_median": 145.78573,
+    "parity": {
+      "atol": 0.001,
+      "elementwise_pass": true,
+      "max_abs_err": 2.8908252716064453e-6,
+      "parity_pass": true,
+      "rel_l2_err": 2.771107573889329e-7,
+      "rel_l2_limit": 0.00001,
+      "rel_pass": true,
+      "rtol": 0.0001
+    },
+    "shape": "2048x512x512",
+    "speedup_vs_dot": 0.8224604836152345,
+    "summary": {
+      "ms_max": 223.637469,
+      "ms_median": 145.78573,
+      "ms_min": 59.415692,
+      "ms_p90": 174.71767599999998
+    },
+    "transpose_once": true
+  },
+  "warmup": 12
+}

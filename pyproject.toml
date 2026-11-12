@@ -1,0 +1,39 @@
+[project]
+name = "brainlab"
+version = "0.1.0"
+description = "One 33M transformer spec, several language implementations, one benchmark harness"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26",
+  "torch>=2.4",
+  "safetensors>=0.4",
+]
+
+[project.optional-dependencies]
+gpu = ["triton>=3.0"]
+data = ["huggingface_hub>=0.23"]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+brainlab = "brainlab.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["python"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", "python"]
+addopts = "-ra --strict-markers"
+markers = [
+  "gpu: requires a CUDA device",
+  "external: shells out to a compiled rust, mojo or cuda binary",
+  "slow: takes more than a few seconds",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"

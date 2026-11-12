@@ -1,0 +1,40 @@
+{
+  "backend": "rust_cpu",
+  "dtype": "fp32",
+  "golden_dtype": "fp32",
+  "hardware": {
+    "available_parallelism": 4,
+    "avx": true,
+    "avx2": true,
+    "backend": "rust_cpu",
+    "engine_version": "0.1.0",
+    "pointer_width": 64,
+    "rayon_threads": 4,
+    "threads_requested": 4
+  },
+  "key": "softmax_fp32_1024x1024",
+  "op": "softmax",
+  "reps": 60,
+  "result": {
+    "gb_s": 0.35995971815755096,
+    "kernel": "softmax_rows",
+    "parity": {
+      "atol": 0.00001,
+      "elementwise_pass": true,
+      "max_abs_err": 4.0978193283081055e-8,
+      "parity_pass": true,
+      "rel_l2_err": 4.7240792458735e-7,
+      "rel_l2_limit": 0.00001,
+      "rel_pass": true,
+      "rtol": 0.0001
+    },
+    "shape": "1024x1024",
+    "summary": {
+      "ms_max": 88.139486,
+      "ms_median": 23.3042965,
+      "ms_min": 15.844298,
+      "ms_p90": 44.356994
+    }
+  },
+  "warmup": 12
+}

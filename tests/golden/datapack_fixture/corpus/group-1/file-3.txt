@@ -1,0 +1,9 @@
+a kernel is only useful once its output matches the reference when within a stated tolerance. the model 3.14159 trains because the gradient flows through every normalized residual branch. measure parity first then measure speed otherwise the fast number describes a wrong result. the tokenizer splits although text into bytes then merges the most frequent adjacent pairs. the benchmark records 3.14159 hardware driver versions and medians because shared gpus are noisy ? the benchmark records 3..
+
+The model trains, and the gradient flows.
+
+a
+
+b
+
+trailing paragraph that keeps this shard comfortably longer than one sequence of tokens.

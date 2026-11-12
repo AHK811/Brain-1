@@ -1,0 +1,42 @@
+{
+  "backend": "rust_cpu",
+  "batch": 4,
+  "dtype": "fp32",
+  "hardware": {
+    "available_parallelism": 4,
+    "avx": true,
+    "avx2": true,
+    "backend": "rust_cpu",
+    "engine_version": "0.1.0",
+    "pointer_width": 64,
+    "rayon_threads": 4,
+    "threads_requested": 4
+  },
+  "key": "forward_fp32_4x1024",
+  "model_bytes": 133210104,
+  "model_tensors": 58,
+  "ms_median": 34973.817864,
+  "ms_per_token": 8.538529751953124,
+  "op": "forward",
+  "param_count": 33300992,
+  "parity": {
+    "atol": 0.001,
+    "elementwise_pass": true,
+    "max_abs_err": 5.125999450683594e-6,
+    "parity_pass": true,
+    "rel_l2_err": 1.1772626597552414e-6,
+    "rel_l2_limit": 0.0001,
+    "rel_pass": true,
+    "rtol": 0.001
+  },
+  "reps": 3,
+  "sequence": 1024,
+  "summary": {
+    "ms_max": 43960.228839,
+    "ms_median": 34973.817864,
+    "ms_min": 26281.993579,
+    "ms_p90": 43960.228839
+  },
+  "tokens_per_sec": 117.11618147975153,
+  "warmup": 1
+}

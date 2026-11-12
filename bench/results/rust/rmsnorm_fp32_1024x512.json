@@ -1,0 +1,43 @@
+{
+  "backend": "rust_cpu",
+  "dtype": "fp32",
+  "golden_dtype": "fp32",
+  "hardware": {
+    "available_parallelism": 4,
+    "avx": true,
+    "avx2": true,
+    "backend": "rust_cpu",
+    "engine_version": "0.1.0",
+    "pointer_width": 64,
+    "rayon_threads": 4,
+    "threads_requested": 4
+  },
+  "key": "rmsnorm_fp32_1024x512",
+  "op": "rmsnorm",
+  "reps": 60,
+  "result": {
+    "flops": 2097152.0,
+    "gb_s": 6.825561829507018,
+    "kernel": "rmsnorm_par",
+    "parity": {
+      "atol": 0.00001,
+      "elementwise_pass": true,
+      "max_abs_err": 1.9073486328125e-6,
+      "parity_pass": true,
+      "rel_l2_err": 5.134615652306243e-8,
+      "rel_l2_limit": 0.00001,
+      "rel_pass": true,
+      "rtol": 0.0001
+    },
+    "shape": "1024x512",
+    "summary": {
+      "ms_max": 31.932545,
+      "ms_median": 0.6147995,
+      "ms_min": 0.4243,
+      "ms_p90": 26.520855
+    },
+    "threads": 4,
+    "timing_mode": "per-rep wall clock"
+  },
+  "warmup": 12
+}

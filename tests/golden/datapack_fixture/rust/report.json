@@ -1,0 +1,19 @@
+{
+  "eos_id": 271,
+  "files": 5,
+  "out": "/mnt/d/BRAIN-LAB/tests/golden/datapack_fixture/rust",
+  "seq_len": 16,
+  "shard_tokens": 48,
+  "train_documents": 13,
+  "train_files": 3,
+  "train_sequences": 85,
+  "train_shards": 29,
+  "train_tokens": 1360,
+  "val_documents": 8,
+  "val_files": 2,
+  "val_sequences": 77,
+  "val_shards": 26,
+  "val_stride": 4,
+  "val_tokens": 1232,
+  "vocab_size": 272
+}

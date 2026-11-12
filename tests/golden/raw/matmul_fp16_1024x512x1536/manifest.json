@@ -1,0 +1,42 @@
+{
+  "__meta__": {
+    "brainlab.atol": "0.2",
+    "brainlab.dtype": "fp16",
+    "brainlab.eps": "1e-06",
+    "brainlab.flops": "1610612736.0",
+    "brainlab.key": "matmul_fp16_1024x512x1536",
+    "brainlab.op": "matmul",
+    "brainlab.rel_l2": "0.005",
+    "brainlab.rtol": "0.02",
+    "brainlab.seed": "1234",
+    "brainlab.shapes": "{\"a\":\"1024x512\",\"b\":\"512x1536\",\"y\":\"1024x1536\"}",
+    "brainlab.traffic_bytes": "5767168"
+  },
+  "a": {
+    "dtype": "fp16",
+    "file": "a.fp16.bin",
+    "nbytes": 1048576,
+    "shape": [
+      1024,
+      512
+    ]
+  },
+  "b": {
+    "dtype": "fp16",
+    "file": "b.fp16.bin",
+    "nbytes": 1572864,
+    "shape": [
+      512,
+      1536
+    ]
+  },
+  "y": {
+    "dtype": "fp16",
+    "file": "y.fp16.bin",
+    "nbytes": 3145728,
+    "shape": [
+      1024,
+      1536
+    ]
+  }
+}

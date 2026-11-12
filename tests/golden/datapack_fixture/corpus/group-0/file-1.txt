@@ -1,0 +1,7 @@
+state-of-the-art 1234567 -42 3.14159
+
+   leading and trailing   
+
+!!!!????;;;;,,,, ---- ==== ###$$$
+
+trailing paragraph that keeps this shard comfortably longer than one sequence of tokens.

@@ -1,0 +1,203 @@
+{
+  "backend": "rust_cpu",
+  "batch": 4,
+  "decode": {
+    "accounted_ms_per_step": 30.330666999999995,
+    "ms_per_step": 32.062568250000005,
+    "prefill_prefix": 1000,
+    "steps": 24,
+    "time_share": [
+      {
+        "calls_per_run": 8.0,
+        "ms_per_run": 9.75317775,
+        "op": "decode_attention_cache",
+        "share_pct": 32.156159803541414
+      },
+      {
+        "calls_per_run": 1.0,
+        "ms_per_run": 5.383408041666667,
+        "op": "decode_linear_logits",
+        "share_pct": 17.74905920026971
+      },
+      {
+        "calls_per_run": 8.0,
+        "ms_per_run": 4.179252791666666,
+        "op": "decode_linear_qkv",
+        "share_pct": 13.77896764244145
+      },
+      {
+        "calls_per_run": 8.0,
+        "ms_per_run": 3.682752666666667,
+        "op": "linear_gate",
+        "share_pct": 12.142010153178193
+      },
+      {
+        "calls_per_run": 8.0,
+        "ms_per_run": 3.5759025833333333,
+        "op": "linear_up",
+        "share_pct": 11.789726165050487
+      },
+      {
+        "calls_per_run": 8.0,
+        "ms_per_run": 3.4004105,
+        "op": "linear_down",
+        "share_pct": 11.211129976139333
+      },
+      {
+        "calls_per_run": 8.0,
+        "ms_per_run": 0.16169587500000002,
+        "op": "silu_mul",
+        "share_pct": 0.5331101851469341
+      },
+      {
+        "calls_per_run": 8.0,
+        "ms_per_run": 0.15799179166666666,
+        "op": "decode_rope_and_cache",
+        "share_pct": 0.520897847932809
+      },
+      {
+        "calls_per_run": 8.0,
+        "ms_per_run": 0.008275,
+        "op": "rmsnorm_mlp",
+        "share_pct": 0.02728261795231869
+      },
+      {
+        "calls_per_run": 8.0,
+        "ms_per_run": 0.008066666666666666,
+        "op": "decode_rearrange",
+        "share_pct": 0.026595744388564442
+      },
+      {
+        "calls_per_run": 8.0,
+        "ms_per_run": 0.007870833333333334,
+        "op": "decode_rmsnorm_attn",
+        "share_pct": 0.025950083238635454
+      },
+      {
+        "calls_per_run": 8.0,
+        "ms_per_run": 0.007079166666666667,
+        "op": "residual_mlp",
+        "share_pct": 0.02333996369636931
+      },
+      {
+        "calls_per_run": 1.0,
+        "ms_per_run": 0.003479166666666667,
+        "op": "decode_embed_gather",
+        "share_pct": 0.011470788514695924
+      },
+      {
+        "calls_per_run": 1.0,
+        "ms_per_run": 0.0013041666666666668,
+        "op": "decode_rmsnorm_final",
+        "share_pct": 0.004299828509101587
+      }
+    ],
+    "tokens_per_sec": 31.18901743000578
+  },
+  "forward_accounted_ms_per_run": 14824.143111333333,
+  "forward_ms_per_run": 14826.269112000002,
+  "forward_time_share": [
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 4394.416179,
+      "op": "attention_causal",
+      "share_pct": 29.643643791055865
+    },
+    {
+      "calls_per_run": 4.0,
+      "ms_per_run": 3058.9610746666663,
+      "op": "linear_logits",
+      "share_pct": 20.634994223227878
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 1930.1117153333334,
+      "op": "linear_qkv",
+      "share_pct": 13.020055869925642
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 1499.6272840000001,
+      "op": "linear_up",
+      "share_pct": 10.116114454221014
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 1498.9746433333332,
+      "op": "linear_gate",
+      "share_pct": 10.111711901832216
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 1140.4076473333332,
+      "op": "linear_down",
+      "share_pct": 7.69290770312026
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 673.5642033333334,
+      "op": "silu_mul",
+      "share_pct": 4.543697387934557
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 397.9227296666666,
+      "op": "linear_proj",
+      "share_pct": 2.68428823627888
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 116.93029633333333,
+      "op": "rope_and_split",
+      "share_pct": 0.7887828352381323
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 49.96414933333333,
+      "op": "residual_and_store",
+      "share_pct": 0.3370457837467503
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 19.044837333333334,
+      "op": "rearrange_heads",
+      "share_pct": 0.1284717584706343
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 14.147572666666667,
+      "op": "residual_mlp",
+      "share_pct": 0.09543602325216749
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 13.064938,
+      "op": "rmsnorm_attn",
+      "share_pct": 0.08813283777604394
+    },
+    {
+      "calls_per_run": 32.0,
+      "ms_per_run": 12.770239666666667,
+      "op": "rmsnorm_mlp",
+      "share_pct": 0.08614487576623286
+    },
+    {
+      "calls_per_run": 4.0,
+      "ms_per_run": 2.706500666666667,
+      "op": "embed_gather",
+      "share_pct": 0.018257383555596526
+    },
+    {
+      "calls_per_run": 4.0,
+      "ms_per_run": 1.5291006666666667,
+      "op": "rmsnorm_final",
+      "share_pct": 0.01031493459812622
+    }
+  ],
+  "key": "forward_fp32_4x1024",
+  "note": "share_pct is of measured op time; compare forward_accounted_ms_per_run against forward_ms_per_run to see what the table does not cover",
+  "op": "profile",
+  "reps": 3,
+  "sequence": 1024,
+  "threads": 4
+}
