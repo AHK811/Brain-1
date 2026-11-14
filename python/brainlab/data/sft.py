@@ -22,7 +22,7 @@ class ChatFormat:
     system: str = "<|system|>"
     user: str = "<|user|>"
     assistant: str = "<|assistant|>"
-    turn_end: str = "<|end|>"
+    turn_end: str = "<|turn_end|>"
 
 
 def encode_chat(

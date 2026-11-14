@@ -118,8 +118,8 @@ def test_flop_formulas_count_useful_work() -> None:
     half = dense / 2.0
     assert abs(attention.flops - half) / half < 2e-3, "counting masked pairs doubles attention GFLOP/s"
 
-    logits = 2.0 * 1024 * 512 * 16384
-    assert logits == 17179869184.0, "the output projection is 17.2 GFLOP at 1x1024, not 34.4"
+    logits = 2.0 * 1024 * 512 * 32768
+    assert logits == 34359738368.0, "the output projection is 34.4 GFLOP at 1x1024 for vocab 32768"
 
 
 def test_every_golden_tensor_uses_its_declared_dtype(golden_index: dict, golden_dir: Path) -> None:

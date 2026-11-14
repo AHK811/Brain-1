@@ -83,11 +83,13 @@ class Muon(Optimizer):
 
 
 def split_params(model: TransformerLM) -> dict[str, list[tuple[str, Tensor]]]:
-    groups: dict[str, list[tuple[str, Tensor]]] = {"matrix": [], "embedding": [], "norm": []}
+    groups: dict[str, list[tuple[str, Tensor]]] = {"matrix": [], "embedding": [], "router": [], "norm": []}
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        if param.ndim >= 2 and name.startswith("blocks."):
+        if param.ndim == 2 and name.endswith("mlp.router.weight"):
+            groups["router"].append((name, param))
+        elif param.ndim >= 2 and name.startswith("blocks."):
             groups["matrix"].append((name, param))
         elif param.ndim >= 2:
             groups["embedding"].append((name, param))
@@ -115,7 +117,7 @@ def build_optimizers(
     muon_cfg.update(muon or {})
     adam_cfg.update(adamw or {})
     groups = split_params(model)
-    decayed = [p for _, p in groups["matrix"] + groups["embedding"]]
+    decayed = [p for _, p in groups["matrix"] + groups["embedding"] + groups["router"]]
     nodecay = [p for _, p in groups["norm"]]
 
     if mode == "muon":
@@ -130,6 +132,7 @@ def build_optimizers(
             AdamW(
                 [
                     {"params": [p for _, p in groups["embedding"]], "weight_decay": adam_cfg["weight_decay"]},
+                    {"params": [p for _, p in groups["router"]], "weight_decay": adam_cfg["weight_decay"]},
                     {"params": nodecay, "weight_decay": 0.0},
                 ],
                 lr=adam_cfg["lr"],

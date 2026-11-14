@@ -69,7 +69,7 @@ table-file FILE:
     {{py}} -m bench.harness.report --file {{FILE}}
 
 tokenizer-train CORPUS=data/corpus VAL=data/tokenizer:
-    cd rust && {{cargo}} run --release -p brainlab-tokenizer --bin train-bpe -- --corpus {{CORPUS}} --out {{VAL}} --vocab-size 16384
+    cd rust && {{cargo}} run --release -p brainlab-tokenizer --bin train-bpe -- --corpus {{CORPUS}} --out {{VAL}} --vocab-size 32768
 
 pack CORPUS=data/corpus TOK=data/tokenizer OUT=data/packed:
     cd rust && {{cargo}} run --release -p brainlab-datapack --bin pack -- --corpus {{CORPUS}} --tokenizer {{TOK}} --out {{OUT}}
@@ -92,19 +92,19 @@ data:
 train *ARGS:
     {{py}} -m brainlab.train.train {{ARGS}}
 
-export SRC=checkpoints/last.pt DST=checkpoints/brainlab-33m.safetensors DT=f32:
+export SRC=checkpoints/last.pt DST=checkpoints/brainlab-moe-105m.safetensors DT=f32:
     {{py}} -m brainlab.export.to_safetensors --checkpoint {{SRC}} --out {{DST}} --dtype {{DT}}
 
-eval CKPT=checkpoints/brainlab-33m.safetensors:
+eval CKPT=checkpoints/brainlab-moe-105m.safetensors:
     {{py}} -m brainlab.eval.perplexity --model {{CKPT}}
 
-gen PROMPT="hello" CKPT=checkpoints/brainlab-33m.safetensors TOK=data/tokenizer:
+gen PROMPT="hello" CKPT=checkpoints/brainlab-moe-105m.safetensors TOK=data/tokenizer:
     {{py}} -m brainlab.eval.generate --model {{CKPT}} --tokenizer-dir {{TOK}} --prompt "{{PROMPT}}"
 
-rust-gen CKPT=checkpoints/brainlab-33m.safetensors TOK=data/tokenizer:
+rust-gen CKPT=checkpoints/brainlab-moe-105m.safetensors TOK=data/tokenizer:
     cd rust && {{cargo}} run --release -p brainlab-infer-cpu --bin brainlab -- generate --model {{CKPT}} --tokenizer {{TOK}}
 
-rust-info CKPT=checkpoints/brainlab-33m.safetensors:
+rust-info CKPT=checkpoints/brainlab-moe-105m.safetensors:
     cd rust && {{cargo}} run --release -p brainlab-infer-cpu --bin brainlab -- info --model {{CKPT}}
 
 wsl-check:

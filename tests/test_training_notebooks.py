@@ -120,7 +120,7 @@ def test_backup_replaces_same_size_changes_and_filters_incomplete_files(helpers,
     helpers["verify_contract"](source, {"run": "one"})
     for name in ("best.pt", "last.pt", "step-000001.pt", "train_log.jsonl", "train_stdout.log", "scored.safetensors"):
         (source / name).write_bytes(b"old!")
-    for name in ("step-999999.pt.tmp", "last.pt.partial", "diverged-999999.pt", "brainlab-33m.safetensors"):
+    for name in ("step-999999.pt.tmp", "last.pt.partial", "diverged-999999.pt", "brainlab-moe-105m.safetensors"):
         (source / name).write_bytes(b"incomplete")
     helpers["backup_run"](source, destination)
     assert not (destination / "scored.safetensors").exists()
@@ -132,7 +132,7 @@ def test_backup_replaces_same_size_changes_and_filters_incomplete_files(helpers,
     assert helpers["backup_run"](source, destination, include_exports=True) == []
     assert not list(destination.glob("*.partial"))
     assert not any("diverged" in path.name or ".tmp" in path.name for path in destination.iterdir())
-    assert not (destination / "brainlab-33m.safetensors").exists()
+    assert not (destination / "brainlab-moe-105m.safetensors").exists()
     (destination / "notebook_run.json").write_text('{"run":"other"}', encoding="utf-8")
     with pytest.raises(RuntimeError, match="another or unverified run"):
         helpers["backup_run"](source, destination)

@@ -20,7 +20,7 @@ from brainlab.model.gpt import TransformerLM
 from brainlab.spec.config import load_model_spec, load_raw_config
 from brainlab.tok.reference import Tokenizer
 from brainlab.train.checkpoint import latest_checkpoint, load_checkpoint, rotate, save_checkpoint
-from brainlab.train.objective import ObjectiveConfig, ObjectiveShards, SequenceWindow, validate_resume_config
+from brainlab.train.objective import ObjectiveConfig, ObjectiveShards, validate_resume_config
 from brainlab.train.optimizer import build_optimizers, peak_lrs, scale_lr
 from brainlab.train.schedule import LRSchedule, tokens_per_step
 from brainlab.util import configure_stdout
@@ -30,6 +30,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(prog="brainlab-train", description="Train the reference transformer.")
     parser.add_argument("--train-dir", type=Path, default=Path("data/packed/train"))
     parser.add_argument("--val-dir", type=Path, default=Path("data/packed/val"))
+    parser.add_argument("--tokenizer-dir", type=Path, default=None,
+                        help="enables control-span thought weighting for shards without a weight sidecar")
     parser.add_argument("--out", type=Path, default=Path("checkpoints"))
     parser.add_argument("--device", default="auto", help="auto, cpu, cuda, or cuda:N")
     parser.add_argument("--dtype", choices=("auto", "fp16", "bf16", "fp32"), default="auto")
@@ -113,6 +115,16 @@ def cycle(batcher: ShardBatcher, start_batch: int = 0) -> Iterator[tuple[np.ndar
         position = 0
 
 
+def move_batch(batch: tuple[np.ndarray, ...], device: torch.device) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | None, float]:
+    ids = torch.from_numpy(np.ascontiguousarray(batch[0])).to(device, non_blocking=True)
+    targets = torch.from_numpy(np.ascontiguousarray(batch[1])).to(device, non_blocking=True)
+    weights = None
+    if len(batch) > 2:
+        weights = torch.from_numpy(np.ascontiguousarray(batch[2])).to(device, non_blocking=True)
+    labelled = float(batch[2].sum()) if weights is not None else float(np.count_nonzero(batch[1] != -1))
+    return ids, targets, weights, labelled
+
+
 def evaluate(
     model: TransformerLM,
     batcher: ShardBatcher,
@@ -123,22 +135,22 @@ def evaluate(
 ) -> dict[str, float]:
     model.eval()
     total_loss = 0.0
+    total_weight = 0.0
     total_tokens = 0
     with torch.no_grad():
-        for index, (x, y) in enumerate(batcher):
+        for index, batch in enumerate(batcher):
             if index >= max_batches:
                 break
-            ids = torch.from_numpy(np.ascontiguousarray(x)).to(device, non_blocking=True)
-            targets = torch.from_numpy(np.ascontiguousarray(y)).to(device, non_blocking=True)
+            ids, targets, weights, labelled = move_batch(batch, device)
             with torch.autocast(device_type=device.type, enabled=amp_enabled, dtype=amp_dtype):
-                _, loss = model(ids, targets)
-            counted = int(np.count_nonzero(y != -1))
-            total_loss += float(loss.detach().float()) * counted
-            total_tokens += counted
+                _, loss = model(ids, targets, weights)
+            total_loss += float(loss.detach().float()) * labelled
+            total_weight += labelled
+            total_tokens += int(np.count_nonzero(batch[1] != -1))
     model.train()
-    if total_tokens == 0:
+    if total_weight == 0:
         raise SystemExit("evaluation had no labelled tokens")
-    mean = total_loss / total_tokens
+    mean = total_loss / total_weight
     return {"val_loss": mean, "val_ppl": math.exp(mean), "val_tokens": float(total_tokens)}
 
 
@@ -204,20 +216,30 @@ def train(argv: Sequence[str] | None = None) -> int:
 
     train_shards = TokenShards(args.train_dir, seq_len)
     val_shards = TokenShards(args.val_dir, seq_len)
-    if len(train_shards) < micro_batch:
-        raise SystemExit(f"only {len(train_shards)} training sequences for micro_batch {micro_batch}")
-    batcher = ShardBatcher(train_shards, micro_batch, shuffle_seed=seed)
+    objective = ObjectiveConfig.from_config(dict(raw.get("objective", {})))
+    tokenizer = Tokenizer.load(args.tokenizer_dir) if args.tokenizer_dir is not None else None
+    if tokenizer is not None and tokenizer.vocab_size > spec.vocab_size:
+        raise SystemExit(f"tokenizer has {tokenizer.vocab_size} tokens but the model head has {spec.vocab_size}")
+    train_view = ObjectiveShards(train_shards, objective, tokenizer)
+    val_view = ObjectiveShards(val_shards, objective, tokenizer)
+    if len(train_view) < micro_batch:
+        raise SystemExit(f"only {len(train_view)} labelled training sequences for micro_batch {micro_batch}")
+    batcher = ShardBatcher(train_view, micro_batch, shuffle_seed=seed)
     eval_batches = args.eval_batches or int(batch_cfg["eval_batches"])
-    eval_batch_size = min(micro_batch, len(val_shards)) or 1
+    eval_batch_size = min(micro_batch, len(val_view)) or 1
     eval_window = eval_batches * eval_batch_size
-    if len(val_shards) < 2 * eval_window:
+    if len(val_view) < 2 * eval_window:
         raise SystemExit(
-            f"val holds {len(val_shards)} sequences but loss tracking and model selection each need "
+            f"val holds {len(val_view)} labelled sequences but loss tracking and model selection each need "
             f"{eval_window}; lower eval_batches instead of scoring best.pt on the same sequences it tracks"
         )
-    eval_batcher = ShardBatcher(TokenShards(args.val_dir, seq_len, offset=0), eval_batch_size, shuffle_seed=None)
+    eval_batcher = ShardBatcher(
+        ObjectiveShards(TokenShards(args.val_dir, seq_len, offset=0), objective, tokenizer),
+        eval_batch_size, shuffle_seed=None,
+    )
     select_batcher = ShardBatcher(
-        TokenShards(args.val_dir, seq_len, offset=eval_window), eval_batch_size, shuffle_seed=None
+        ObjectiveShards(TokenShards(args.val_dir, seq_len, offset=eval_window), objective, tokenizer),
+        eval_batch_size, shuffle_seed=None,
     )
 
     model = TransformerLM(spec, gradient_checkpoint=args.grad_ckpt).to(device=device, dtype=torch.float32)
@@ -244,8 +266,10 @@ def train(argv: Sequence[str] | None = None) -> int:
         total_steps=total_steps,
         min_lr_fraction=float(sched_cfg["min_lr_fraction"]),
         decay=str(sched_cfg["decay"]),
+        stable_fraction=float(sched_cfg.get("stable_fraction", 0.7)),
     )
 
+    peaks = peak_lrs(optims)
     run_config = {
         "seed": seed,
         "seq_len": seq_len,
@@ -255,13 +279,18 @@ def train(argv: Sequence[str] | None = None) -> int:
         "total_steps": total_steps,
         "eval_batches": eval_batches,
         "eval_batch_size": eval_batch_size,
-        "train_sequences": len(train_shards),
-        "val_sequences": len(val_shards),
+        "train_sequences": len(train_view),
+        "val_sequences": len(val_view),
+        "objective": objective.as_dict(),
+        "loss_weights": train_view.provenance["loss_weights"],
+        "data_provenance": train_view.provenance["sha256"],
+        "tokenizer": train_view.provenance["tokenizer"],
+        "schedule": schedule.as_dict(),
+        "peak_lrs": peaks,
     }
     start_step = 0
     best_val = float("inf")
     start_batch = 0
-    peaks = peak_lrs(optims)
     if args.resume:
         path = args.resume
     elif args.dry_run or args.init_from:
@@ -272,9 +301,7 @@ def train(argv: Sequence[str] | None = None) -> int:
         _, meta = load_checkpoint(path, model, optims, scaler, map_location="cpu")
         start_step = int(meta["step"])
         resumed = meta.get("cfg", {})
-        for key, value in run_config.items():
-            if key in resumed and resumed[key] != value:
-                raise SystemExit(f"resume {key}={resumed[key]} differs from requested {value}; keep the original run settings")
+        validate_resume_config(resumed, run_config)
         best_val = float(resumed.get("best_val", float("inf")))
         start_batch = int(resumed.get("start_batch", start_step * accum))
         print(f"resumed {path} at step {start_step}, best select loss {best_val:.4f}, batch {start_batch}", flush=True)
@@ -304,8 +331,11 @@ def train(argv: Sequence[str] | None = None) -> int:
         "start_batch": start_batch,
         "peak_lrs": peaks,
         "torch": torch.__version__,
-        "train_sequences": len(train_shards),
-        "val_sequences": len(val_shards),
+        "train_sequences": len(train_view),
+        "val_sequences": len(val_view),
+        "objective": objective.as_dict(),
+        "loss_weights": train_view.provenance["loss_weights"],
+        "thought_weight": objective.thought_weight,
         "eval_track_window": [0, eval_window],
         "eval_select_window": [eval_window, 2 * eval_window],
         "report_scope": "brainlab-ppl over the whole val dir; the in-training windows below are for tracking and selection only",
@@ -340,11 +370,9 @@ def train(argv: Sequence[str] | None = None) -> int:
         scale_lr(optims, schedule.factor_at(step), peaks)
         accumulated = torch.zeros((), device=device)
         for _ in range(accum):
-            x, y = next(data)
-            ids = torch.from_numpy(np.ascontiguousarray(x)).to(device, non_blocking=True)
-            targets = torch.from_numpy(np.ascontiguousarray(y)).to(device, non_blocking=True)
+            ids, targets, weights, _ = move_batch(next(data), device)
             with torch.autocast(device_type=device.type, enabled=amp_enabled, dtype=amp_dtype):
-                _, loss = compute(ids, targets)
+                _, loss = compute(ids, targets, weights)
             scaler.scale(loss / accum).backward()
             accumulated += loss.detach().float()
         window_tokens += header["tokens_per_step"]

@@ -598,7 +598,7 @@ impl<'w> Engine<'w> {
     /// Fills the KV cache for the whole prompt and emits logits for the final position only.
     ///
     /// Generation needs one row of logits to pick the first token, so the all-rows path allocates
-    /// `seq * vocab` floats (64 MiB at seq=1024, vocab=16384, fp32) to throw all but one row away.
+    /// `seq * vocab` floats (128 MiB at seq=1024, vocab=32768, fp32) to throw all but one row away.
     pub fn prefill_last(&mut self, ids: &[u32], last_logits: &mut [f32]) -> Result<()> {
         let weights = self.weights;
         let seq = ids.len();
@@ -639,31 +639,26 @@ impl<'w> Engine<'w> {
             linear_tiled(
                 &self.rms[..seq * d],
                 qkv_weight,
-                &mut self.qkv[..seq * 3 * d],
+                &mut self.qkv[..seq * spec.qkv_out()],
                 seq,
                 d,
-                3 * d,
+                spec.qkv_out(),
                 None,
             )?;
             profile::record("linear_qkv", stamp);
             let stamp = profile::start();
             self.split_qkv(spec, seq);
-            for head in 0..heads {
-                let begin = head * seq * hd;
-                self.rope
-                    .apply_rows(&mut self.q[begin..begin + seq * hd], 0)?;
-                self.rope
-                    .apply_rows(&mut self.k[begin..begin + seq * hd], 0)?;
-            }
+            self.apply_rope(spec, seq, 0)?;
             profile::record("rope_and_split", stamp);
             let stamp = profile::start();
-            attention_causal(
+            attention_causal_gqa(
                 &self.q[..heads * seq * hd],
-                &self.k[..heads * seq * hd],
-                &self.v[..heads * seq * hd],
+                &self.k[..spec.n_kv_heads * seq * hd],
+                &self.v[..spec.n_kv_heads * seq * hd],
                 &mut self.attention_out[..heads * seq * hd],
                 1,
                 heads,
+                spec.n_kv_heads,
                 seq,
                 hd,
                 spec.attn_scale(),
@@ -751,35 +746,27 @@ impl<'w> Engine<'w> {
             linear_tiled(
                 &self.rms[..d],
                 qkv_weight,
-                &mut self.qkv[..3 * d],
+                &mut self.qkv[..spec.qkv_out()],
                 1,
                 d,
-                3 * d,
+                spec.qkv_out(),
                 None,
             )?;
             profile::record("decode_linear_qkv", stamp);
             let stamp = profile::start();
-            for head in 0..heads {
-                let plane = head * hd;
-                self.q[plane..plane + hd].copy_from_slice(&self.qkv[plane..plane + hd]);
-                self.k[plane..plane + hd].copy_from_slice(&self.qkv[d + plane..d + plane + hd]);
-                self.v[plane..plane + hd]
-                    .copy_from_slice(&self.qkv[2 * d + plane..2 * d + plane + hd]);
-                self.rope
-                    .apply_rows(&mut self.q[plane..plane + hd], position)?;
-                self.rope
-                    .apply_rows(&mut self.k[plane..plane + hd], position)?;
-            }
-            self.split_qkv_to_cache(spec, layer, position)?;
+            self.split_qkv(spec, 1);
+            self.apply_rope(spec, 1, position)?;
+            self.store_kv(spec, layer, 1, position)?;
             profile::record("decode_rope_and_cache", stamp);
-            let cache_base = layer * spec.context_len * d;
+            let cache_base = layer * spec.context_len * spec.kv_width();
             let stamp = profile::start();
-            attention_cache(
+            attention_cache_gqa(
                 &self.q[..heads * hd],
-                &self.cache_k[cache_base..cache_base + spec.context_len * d],
-                &self.cache_v[cache_base..cache_base + spec.context_len * d],
+                &self.cache_k[cache_base..cache_base + spec.context_len * spec.kv_width()],
+                &self.cache_v[cache_base..cache_base + spec.context_len * spec.kv_width()],
                 &mut self.attention_out[..heads * hd],
                 heads,
+                spec.n_kv_heads,
                 position + 1,
                 spec.context_len,
                 hd,
@@ -820,21 +807,6 @@ impl<'w> Engine<'w> {
             None,
         )?;
         profile::record("decode_linear_logits", stamp);
-        Ok(())
-    }
-
-    fn split_qkv_to_cache(&mut self, spec: &'w ModelSpec, layer: usize, row: usize) -> Result<()> {
-        let (heads, hd, d) = (spec.n_heads, spec.head_dim, spec.d_model);
-        if row >= spec.context_len {
-            bail!("kv cache overflow at position {row}");
-        }
-        let base = layer * spec.context_len * d + row * hd;
-        for head in 0..heads {
-            let src = head * hd;
-            let dst = base + head * spec.context_len * hd;
-            self.cache_k[dst..dst + hd].copy_from_slice(&self.k[src..src + hd]);
-            self.cache_v[dst..dst + hd].copy_from_slice(&self.v[src..src + hd]);
-        }
         Ok(())
     }
 }

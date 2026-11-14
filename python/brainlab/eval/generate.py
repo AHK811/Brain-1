@@ -123,10 +123,14 @@ def generate(
             "call_start", "call_end", "response_start", "response_end",
         )}
     produced: list[int] = []
+    thought_end: int | None = None
+    in_thought = False
     if reason_by_default:
         thought = control_id(tokenizer, "<|thought_start|>")
+        thought_end = control_id(tokenizer, "<|thought_end|>")
         context_ids.append(thought)
         produced.append(thought)
+        in_thought = True
     limit = model.spec.context_len
     if len(context_ids) > limit:
         raise GenerationError("prompt exceeds model context limit")
@@ -176,6 +180,8 @@ def generate(
                     runner.validate_call(call_grammar.data)
                     allowed[:, controls["call_end"]] = True
             else:
+                if in_thought and thought_end is not None:
+                    allowed[:, thought_end] = True
                 if grammar is None or grammar.complete:
                     if 0 <= eos_id < logits.shape[-1]:
                         allowed[:, eos_id] = True
@@ -188,6 +194,8 @@ def generate(
         sampled += 1
         context_ids.append(next_id)
         produced.append(next_id)
+        closes_thought = in_thought and next_id == thought_end
+        in_thought = in_thought and not closes_thought
         if runner is not None and call_grammar is None and next_id == controls["call_start"]:
             call_grammar = runner.grammar.fresh()
         elif runner is not None and call_grammar is not None and next_id == controls["call_end"]:
@@ -203,7 +211,7 @@ def generate(
             call_grammar = None
         elif call_grammar is not None:
             call_grammar.advance(tokenizer.token_bytes[next_id])
-        elif grammar is not None:
+        elif grammar is not None and not closes_thought:
             grammar.advance(tokenizer.token_bytes[next_id])
     if call_grammar is not None:
         raise GenerationError(f"{finish_reason} limit left an incomplete tool call")

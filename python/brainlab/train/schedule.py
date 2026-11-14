@@ -16,8 +16,8 @@ class LRSchedule:
     stable_fraction: float = 0.7
 
     def __post_init__(self) -> None:
-        if self.peak_lr <= 0:
-            raise ValueError("peak_lr must be positive")
+        if not math.isfinite(self.peak_lr) or self.peak_lr <= 0:
+            raise ValueError("peak_lr must be finite and positive")
         if self.total_steps <= 0:
             raise ValueError("total_steps must be positive")
         if self.warmup_steps < 0:

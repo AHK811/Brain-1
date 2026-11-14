@@ -13,9 +13,17 @@ def test_groups_partition_the_model_exactly(spec) -> None:
     groups = split_params(model)
     expected_matrix = {
         f"blocks.{index}.attn.{name}.weight" for index in layers for name in ("qkv", "proj")
-    } | {f"blocks.{index}.mlp.{name}.weight" for index in layers for name in ("gate", "up", "down")}
+    } | {
+        f"blocks.{index}.mlp.experts.{slot}.{name}.weight"
+        for index in layers
+        for slot in range(spec.n_experts)
+        for name in ("gate", "up", "down")
+    }
     assert {name for name, _ in groups["matrix"]} == expected_matrix
-    assert {name for name, _ in groups["embedding"]} == {"token_emb.weight"}
+    assert {name for name, _ in groups["embedding"]} == {"token_emb.weight", "lm_head.weight"}
+    assert {name for name, _ in groups["router"]} == {
+        f"blocks.{index}.mlp.router.weight" for index in layers
+    }
     assert {name for name, _ in groups["norm"]} == {"final_norm.weight"} | {
         f"blocks.{index}.{name}.weight" for index in layers for name in ("attn_norm", "mlp_norm")
     }
@@ -29,13 +37,25 @@ def test_block_matrices_are_optimised_by_muon(spec) -> None:
     names = {id(param): name for name, param in model.named_parameters()}
     muon, adamw = build_optimizers(model, mode="muon")
     muon_names = {names[id(p)] for group in muon.param_groups for p in group["params"]}
-    adam_names = {names[id(p)] for group in adamw.param_groups for p in group["params"]}
-    for suffix in (".attn.proj.weight", ".mlp.down.weight"):
-        hit = [name for name in muon_names if name.endswith(suffix)]
-        assert len(hit) == spec.n_layers, f"{suffix} must be in Muon on every layer, D017"
+    adam_decay = {names[id(p)]: group["weight_decay"] for group in adamw.param_groups for p in group["params"]}
+    adam_names = set(adam_decay)
+    expected = {
+        "qkv": spec.n_layers,
+        "proj": spec.n_layers,
+        "gate": spec.n_layers * spec.n_experts,
+        "up": spec.n_layers * spec.n_experts,
+        "down": spec.n_layers * spec.n_experts,
+    }
+    for suffix, count in expected.items():
+        hit = [name for name in muon_names if name.endswith("." + suffix + ".weight")]
+        assert len(hit) == count, f"{suffix} must be in Muon on every layer, D017"
     assert not (muon_names & adam_names), "the two optimizers must not share a parameter"
-    assert "token_emb.weight" in adam_names
-    assert all(group["weight_decay"] == 0.0 for group in adamw.param_groups[1:]), "norms must not decay"
+    assert {"token_emb.weight", "lm_head.weight"} <= adam_names
+    assert len(adam_names) == 3 + 2 * spec.n_layers + spec.n_layers, "AdamW owns the head, embedding, routers and norms"
+    norms = [name for name in adam_names if name.endswith("_norm.weight")]
+    assert len(norms) == 2 * spec.n_layers + 1, "every norm gain reaches AdamW"
+    assert all(adam_decay[name] == 0.0 for name in norms), "norms must not decay"
+    assert all(adam_decay[name] > 0.0 for name in ("token_emb.weight", "lm_head.weight")), "the head must decay"
 
 
 def test_muon_counts_a_non_finite_update_instead_of_hiding_it() -> None:

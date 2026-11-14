@@ -14,9 +14,9 @@ from brainlab.data.shards import TokenShards
 
 @dataclass(frozen=True)
 class ObjectiveConfig:
-    thought_weight: float = 1.0
-    thought_start: str = "<think>"
-    thought_end: str = "</think>"
+    thought_weight: float = 2.0
+    thought_start: str = "<|thought_start|>"
+    thought_end: str = "<|thought_end|>"
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.thought_weight) or self.thought_weight <= 0:
@@ -52,7 +52,10 @@ def tokenizer_provenance(tokenizer: Any) -> dict[str, Any]:
 def control_id(tokenizer: Any, text: str) -> int:
     if not hasattr(tokenizer, "special_id"):
         raise ValueError("this objective requires a tokenizer with explicit control tokens")
-    token_id = tokenizer.special_id(text)
+    try:
+        token_id = tokenizer.special_id(text)
+    except KeyError:
+        raise ValueError(f"tokenizer has no control token {text!r}") from None
     if token_id is None:
         raise ValueError(f"tokenizer has no control token {text!r}")
     if list(tokenizer.encode(text, allow_special=True)) != [token_id]:
@@ -151,20 +154,6 @@ class ObjectiveShards:
         y = y.copy()
         y[weights == 0] = -1
         return x, y, weights
-
-
-class SequenceWindow:
-    def __init__(self, shards: ObjectiveShards, offset: int) -> None:
-        self.shards = shards
-        self.offset = offset
-
-    def __len__(self) -> int:
-        return max(len(self.shards) - self.offset, 0)
-
-    def __getitem__(self, index: int) -> tuple[np.ndarray, ...]:
-        if not 0 <= index < len(self):
-            raise IndexError(index)
-        return self.shards[index + self.offset]
 
 
 def validate_resume_config(saved: Mapping[str, Any], requested: Mapping[str, Any]) -> None:

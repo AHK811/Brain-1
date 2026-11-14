@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import dataclasses
 import json
 from pathlib import Path
 
@@ -58,6 +59,25 @@ def golden_index(golden_dir: Path) -> dict:
 @pytest.fixture(scope="session")
 def spec():
     return load_model_spec()
+
+
+@pytest.fixture(scope="session")
+def smoke_spec(spec):
+    """The canonical shape relations at a size a unit test can run in a second."""
+    candidate = dataclasses.replace(
+        spec,
+        name="brainlab-smoke",
+        d_model=64,
+        n_layers=2,
+        n_heads=4,
+        n_kv_heads=2,
+        head_dim=16,
+        vocab_size=259,
+        context_len=32,
+        mlp_hidden=64,
+        param_budget=0,
+    )
+    return dataclasses.replace(candidate, param_budget=candidate.param_count)
 
 
 @pytest.fixture(scope="session")

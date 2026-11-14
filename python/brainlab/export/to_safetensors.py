@@ -29,6 +29,22 @@ BLOCK_TO_FORMAT = {
     "mlp.down.weight": "mlp_down.weight",
 }
 FORMAT_TO_BLOCK = {v: k for k, v in BLOCK_TO_FORMAT.items()}
+EXPERT_TO_FORMAT = {"gate": "mlp_gate", "up": "mlp_up", "down": "mlp_down"}
+FORMAT_TO_EXPERT = {v: k for k, v in EXPERT_TO_FORMAT.items()}
+
+
+def module_to_format(rest: str) -> str:
+    parts = rest.split(".")
+    if rest.startswith("mlp.experts."):
+        return f"experts.{parts[2]}.{EXPERT_TO_FORMAT[parts[3]]}.weight"
+    return BLOCK_TO_FORMAT[rest]
+
+
+def format_to_module(rest: str) -> str:
+    parts = rest.split(".")
+    if rest.startswith("experts."):
+        return f"mlp.experts.{parts[1]}.{FORMAT_TO_EXPERT[parts[2]]}.weight"
+    return FORMAT_TO_BLOCK[rest]
 
 
 def to_weight_names(state: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -36,9 +52,10 @@ def to_weight_names(state: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
     for name, tensor in state.items():
         if name.startswith("blocks."):
             _, index, rest = name.split(".", 2)
-            formatted = BLOCK_TO_FORMAT.get(rest)
-            if formatted is None:
-                raise KeyError(f"no weights_format name for module parameter {name!r}")
+            try:
+                formatted = module_to_format(rest)
+            except KeyError:
+                raise KeyError(f"no weights_format name for module parameter {name!r}") from None
             out[f"layers.{index}.{formatted}"] = tensor
         elif name in MODULE_TO_FORMAT:
             out[MODULE_TO_FORMAT[name]] = tensor
@@ -52,9 +69,10 @@ def to_module_names(tensors: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]
     for name, tensor in tensors.items():
         if name.startswith("layers."):
             _, index, rest = name.split(".", 2)
-            module = FORMAT_TO_BLOCK.get(rest)
-            if module is None:
-                raise KeyError(f"weights {name!r} not in spec/weights_format.md")
+            try:
+                module = format_to_module(rest)
+            except KeyError:
+                raise KeyError(f"weights {name!r} not in spec/weights_format.md") from None
             out[f"blocks.{index}.{module}"] = tensor
         elif name in MODULE_TO_FORMAT:
             out[MODULE_TO_FORMAT[name]] = tensor

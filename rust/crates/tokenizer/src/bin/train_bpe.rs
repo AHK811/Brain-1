@@ -15,7 +15,7 @@ struct Args {
     corpus: PathBuf,
     #[arg(long)]
     out: PathBuf,
-    #[arg(long, default_value_t = 16384)]
+    #[arg(long, default_value_t = 32768)]
     vocab_size: usize,
     #[arg(long)]
     report: Option<PathBuf>,

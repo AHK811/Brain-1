@@ -18,6 +18,7 @@ SMALLEST = (
     "matmul_fp32_512x1344x512",
     "attention_fp32_4x8x256x64",
 )
+FORWARD_KEYS = ("forward_fp32_1x512",)
 CEILING = peak.Peak(None, "cpu rows are not compared against a GPU peak", "cpu")
 
 
@@ -66,6 +67,21 @@ def test_pytorch_eager_matches_the_golden_reference(key: str, golden_root: Path,
 
 @pytest.mark.parametrize("key", SMALLEST)
 def test_rust_cpu_matches_the_golden_reference(key: str, golden_root: Path, tmp_path: Path) -> None:
+    binary = default_binary_paths(repo_root())["rust"]
+    row = harness_row("rust_cpu", workload_for(key), golden_root, tmp_path)
+    if row.get("status") == "unavailable":
+        pytest.skip(f"rust_cpu not runnable from {binary or 'rust/target/release/brainlab'}: {row['note']}")
+    assert row.get("parity_pass"), f"{key}: {row}"
+
+
+@pytest.mark.parametrize("key", FORWARD_KEYS)
+def test_pytorch_eager_forward_matches_the_golden_reference(key: str, golden_root: Path, tmp_path: Path) -> None:
+    row = harness_row("pytorch_eager_forward", workload_for(key), golden_root, tmp_path)
+    assert row.get("parity_pass"), f"{key}: {row}"
+
+
+@pytest.mark.parametrize("key", FORWARD_KEYS)
+def test_rust_cpu_forward_matches_the_golden_reference(key: str, golden_root: Path, tmp_path: Path) -> None:
     binary = default_binary_paths(repo_root())["rust"]
     row = harness_row("rust_cpu", workload_for(key), golden_root, tmp_path)
     if row.get("status") == "unavailable":

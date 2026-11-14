@@ -1,12 +1,13 @@
 [project]
 name = "brainlab"
 version = "0.1.0"
-description = "One 33M transformer spec, several language implementations, one benchmark harness"
+description = "One 105M MoE transformer spec, several language implementations, one benchmark harness"
 requires-python = ">=3.11"
 dependencies = [
   "numpy>=1.26",
   "torch>=2.4",
   "safetensors>=0.4",
+  "regex>=2024.5.15",
 ]
 
 [project.optional-dependencies]
