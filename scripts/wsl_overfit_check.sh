@@ -12,6 +12,7 @@ cd "$ROOT" || exit 2
 
 echo "== overfit baseline: one 10-line math/code snippet, single micro-batch, $STEPS steps"
 "$PY" - "$WORK" <<'PYEOF' || exit 1
+import json
 import sys
 from pathlib import Path
 
@@ -22,10 +23,10 @@ from brainlab.train.objective import ObjectiveConfig
 
 work = Path(sys.argv[1])
 tokenizer = Tokenizer(
-    token_bytes=tuple(bytes([b]) for b in range(256)),
+    token_bytes=tuple(bytes([b]) for b in range(256)) + (b"<pad>", b"<eos>"),
     merges=(),
-    eos_id=256,
-    pad_id=257,
+    eos_id=257,
+    pad_id=256,
 )
 snippet = """\
 def gcd(a, b):
@@ -63,9 +64,11 @@ records = [
     ]}
     for _ in range(4)
 ]
+chat_jsonl = work / "chat.jsonl"
+chat_jsonl.write_text("".join(json.dumps(record) + "\n" for record in records), encoding="utf-8")
 chat_cfg = PackConfig(seq_len=64, shard_tokens=512, eos_id=chat_tok.eos_id)
-prepare_sft(records, chat_tok, work / "chat_train", chat_cfg, objective, "train")
-prepare_sft(records[:2], chat_tok, work / "chat_val", chat_cfg, objective, "val")
+prepare_sft([chat_jsonl], chat_tok, work / "chat_train", chat_cfg, objective, "train")
+prepare_sft([chat_jsonl], chat_tok, work / "chat_val", chat_cfg, objective, "val")
 PYEOF
 
 "$PY" -m brainlab.train.train \
