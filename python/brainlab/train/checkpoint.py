@@ -81,23 +81,29 @@ def load_checkpoint(
 def rotate(directory: Path, keep: int) -> list[Path]:
     if keep < 1:
         raise ValueError("keep must be at least 1")
-    checkpoints = sorted(directory.glob("step-*.pt"), key=lambda p: _step_of(p))
-    removed: list[Path] = []
-    while len(checkpoints) - len(removed) > keep:
-        oldest = checkpoints[0]
-        oldest.unlink()
-        removed.append(oldest)
-        checkpoints = checkpoints[1:]
+    checkpoints = sorted(
+        (path for path in directory.glob("step-*.pt") if _step_of(path) >= 0 and path.is_file()),
+        key=_step_of,
+    )
+    removed = checkpoints[:-keep]
+    for path in removed:
+        path.unlink()
     return removed
 
 
 def _step_of(path: Path) -> int:
-    stem = path.stem
-    return int(stem.split("-")[1]) if "-" in stem else -1
+    suffix = path.stem.removeprefix("step-")
+    return int(suffix) if suffix.isdigit() else -1
 
 
 def latest_checkpoint(directory: Path) -> Path | None:
     if not directory.is_dir():
         return None
-    candidates = [p for p in directory.glob("step-*.pt") if _step_of(p) >= 0]
-    return max(candidates, key=_step_of) if candidates else None
+    candidates = [p for p in directory.glob("step-*.pt") if _step_of(p) >= 0 and p.is_file()]
+    latest = max(candidates, key=_step_of) if candidates else None
+    last = directory / "last.pt"
+    if last.is_file():
+        last_step = int(load_payload(last)["step"])
+        if latest is None or last_step >= _step_of(latest):
+            return last
+    return latest

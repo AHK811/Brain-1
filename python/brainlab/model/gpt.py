@@ -5,6 +5,7 @@ import math
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from torch.utils.checkpoint import checkpoint
 
 from brainlab.model.layers import RMSNorm, TransformerBlock, rope_table
 from brainlab.spec.config import ModelSpec
@@ -72,7 +73,7 @@ class TransformerLM(nn.Module):
         cos, sin = self.rope(ids.shape[-1], x.device, x.dtype)
         for block in self.blocks:
             if self.gradient_checkpoint and self.training:
-                x = torch.utils.checkpoint.checkpoint(block, x, cos, sin, use_reentrant=False)
+                x = checkpoint(block, x, cos, sin, use_reentrant=False)
             else:
                 x = block(x, cos, sin)
         return self.final_norm(x)

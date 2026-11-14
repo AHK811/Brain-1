@@ -29,8 +29,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--train-dir", type=Path, default=Path("data/packed/train"))
     parser.add_argument("--val-dir", type=Path, default=Path("data/packed/val"))
     parser.add_argument("--out", type=Path, default=Path("checkpoints"))
-    parser.add_argument("--device", default="auto")
-    parser.add_argument("--dtype", choices=("fp16", "fp32"), default=None)
+    parser.add_argument("--device", default="auto", help="auto, cpu, cuda, or cuda:N")
+    parser.add_argument("--dtype", choices=("auto", "fp16", "bf16", "fp32"), default="auto")
     parser.add_argument("--optimizer", choices=("muon", "adamw"), default=None)
     parser.add_argument("--steps", type=int, default=None)
     parser.add_argument("--micro-batch", type=int, default=None)
@@ -53,11 +53,33 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def resolve_device(text: str) -> torch.device:
     if text == "auto":
-        return torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        text = "cuda" if torch.cuda.is_available() else "cpu"
     device = torch.device(text)
-    if device.type == "cuda" and not torch.cuda.is_available():
-        raise SystemExit("--device cuda requested but CUDA is unavailable")
+    if device.type not in ("cpu", "cuda"):
+        raise SystemExit("training supports --device cpu, cuda, or cuda:N")
+    if device.type == "cuda":
+        if not torch.cuda.is_available():
+            raise SystemExit(
+                "CUDA is unavailable; install CUDA-enabled PyTorch and check the NVIDIA driver, "
+                "or use --device cpu"
+            )
+        if device.index is not None and device.index >= torch.cuda.device_count():
+            raise SystemExit(f"CUDA device {device.index} is not visible")
     return device
+
+
+def resolve_dtype(name: str, device: torch.device) -> str:
+    if device.type == "cpu":
+        if name not in ("auto", "fp32"):
+            raise SystemExit("CPU training requires --dtype fp32 or auto")
+        return "fp32"
+    with torch.cuda.device(device):
+        native_bf16 = torch.cuda.get_device_capability(device)[0] >= 8 and torch.cuda.is_bf16_supported()
+    if name == "auto":
+        return "bf16" if native_bf16 else "fp16"
+    if name == "bf16" and not native_bf16:
+        raise SystemExit("this CUDA device does not support native BF16; use --dtype fp16")
+    return name
 
 
 def git_state() -> str:
@@ -167,12 +189,13 @@ def train(argv: Sequence[str] | None = None) -> int:
     grad_clip = float(sched_cfg["grad_clip"])
 
     device = resolve_device(args.device)
-    dtype_name = args.dtype or ("fp16" if device.type == "cuda" else "fp32")
-    if dtype_name == "fp16" and device.type != "cuda":
-        print("fp16 autocast needs CUDA; falling back to fp32", flush=True)
-        dtype_name = "fp32"
-    amp_enabled = dtype_name == "fp16"
-    amp_dtype = torch.float16 if amp_enabled else torch.float32
+    dtype_name = resolve_dtype(args.dtype, device)
+    amp_enabled = dtype_name != "fp32"
+    amp_dtype = {"fp16": torch.float16, "bf16": torch.bfloat16, "fp32": torch.float32}[dtype_name]
+    if args.resume is not None and not args.resume.is_file():
+        raise SystemExit(f"resume checkpoint does not exist: {args.resume}")
+    if args.resume is not None and args.init_from is not None:
+        raise SystemExit("choose --resume or --init-from, not both")
 
     torch.manual_seed(seed)
     np.random.seed(seed % (2**32))
@@ -208,7 +231,7 @@ def train(argv: Sequence[str] | None = None) -> int:
         active_cfg["lr"] = args.lr
     optims: list[Optimizer] = build_optimizers(model, mode=mode, muon=muon_cfg, adamw=adamw_cfg)
     compute = torch.compile(model) if args.compile else model
-    scaler = torch.amp.GradScaler(device.type, enabled=amp_enabled)
+    scaler = torch.amp.GradScaler(device.type, enabled=dtype_name == "fp16")
 
     peak_reference = float(active_cfg["lr"])
     total_steps = args.steps or int(sched_cfg["total_steps"])
@@ -221,20 +244,35 @@ def train(argv: Sequence[str] | None = None) -> int:
         decay=str(sched_cfg["decay"]),
     )
 
+    run_config = {
+        "seed": seed,
+        "seq_len": seq_len,
+        "micro_batch": micro_batch,
+        "accum_steps": accum,
+        "optimizer": mode,
+        "total_steps": total_steps,
+        "eval_batches": eval_batches,
+        "eval_batch_size": eval_batch_size,
+        "train_sequences": len(train_shards),
+        "val_sequences": len(val_shards),
+    }
     start_step = 0
     best_val = float("inf")
     start_batch = 0
     peaks = peak_lrs(optims)
     if args.resume:
         path = args.resume
-    elif args.dry_run:
+    elif args.dry_run or args.init_from:
         path = None
     else:
         path = latest_checkpoint(args.out)
-    if path is not None and path.is_file():
-        _, meta = load_checkpoint(path, model, optims, scaler, map_location=str(device))
+    if path is not None:
+        _, meta = load_checkpoint(path, model, optims, scaler, map_location="cpu")
         start_step = int(meta["step"])
         resumed = meta.get("cfg", {})
+        for key, value in run_config.items():
+            if key in resumed and resumed[key] != value:
+                raise SystemExit(f"resume {key}={resumed[key]} differs from requested {value}; keep the original run settings")
         best_val = float(resumed.get("best_val", float("inf")))
         start_batch = int(resumed.get("start_batch", start_step * accum))
         print(f"resumed {path} at step {start_step}, best select loss {best_val:.4f}, batch {start_batch}", flush=True)
@@ -248,6 +286,9 @@ def train(argv: Sequence[str] | None = None) -> int:
         "device": str(device),
         "device_name": torch.cuda.get_device_properties(device).name if device.type == "cuda" else "cpu",
         "dtype": dtype_name,
+        "grad_scaler": scaler.is_enabled(),
+        "cuda_runtime": torch.version.cuda,
+        "device_memory_gb": round(torch.cuda.get_device_properties(device).total_memory / 1e9, 3) if device.type == "cuda" else None,
         "optimizer": mode,
         "seq_len": seq_len,
         "micro_batch": micro_batch,
@@ -278,11 +319,11 @@ def train(argv: Sequence[str] | None = None) -> int:
 
     data = cycle(batcher, start_batch)
     step = start_step
-    tokens_seen = step * header["tokens_per_step"]
+    tokens_seen = start_batch * micro_batch * seq_len
     window_start = time.perf_counter()
     window_tokens = 0
     ema_loss: float | None = None
-    batches_in_epoch = max(len(batcher) * accum, 1)
+    batches_in_epoch = len(batcher)
     consecutive_skips = 0
     zero_grad_streak = 0
     muon_skips = 0
@@ -291,7 +332,7 @@ def train(argv: Sequence[str] | None = None) -> int:
     scale_floor = float(sched_cfg["scale_floor"])
 
     def checkpoint_cfg(completed: int) -> dict[str, object]:
-        return {"seed": seed, "best_val": best_val, "start_batch": completed * accum}
+        return {**run_config, "best_val": best_val, "start_batch": start_batch + (completed - start_step) * accum}
 
     while step < total_steps:
         scale_lr(optims, schedule.factor_at(step), peaks)
@@ -344,7 +385,7 @@ def train(argv: Sequence[str] | None = None) -> int:
                 "tokens_per_sec": round(tps, 1),
                 "tokens_seen": tokens_seen,
                 "elapsed_sec": round(time.perf_counter() - window_start, 2),
-                "epoch": round(step / batches_in_epoch, 3),
+                "epoch": round((start_batch + (step - start_step) * accum) / batches_in_epoch, 3),
                 "mem_gb": round(torch.cuda.max_memory_allocated(device) / 1e9, 3) if device.type == "cuda" else 0.0,
             }
             with log_path.open("a", encoding="utf-8") as fh:
@@ -360,7 +401,7 @@ def train(argv: Sequence[str] | None = None) -> int:
             consecutive_skips=consecutive_skips,
             zero_grad_streak=zero_grad_streak,
             scale=scaler.get_scale(),
-            amp_enabled=amp_enabled,
+            amp_enabled=scaler.is_enabled(),
             muon_skips=muon_skips,
             skip_limit=skip_limit,
             zero_grad_limit=zero_grad_limit,

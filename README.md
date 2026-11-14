@@ -199,10 +199,26 @@ source .venv/bin/activate
 
 ### 3. Install the Python package
 
+Install PyTorch for the machine you will train on, then install this project in the same environment.
+
+CPU:
+
 ```bash
-python -m pip install --upgrade pip
+python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
 python -m pip install -e ".[dev]"
 ```
+
+NVIDIA GPU on Windows or Linux, with a compatible NVIDIA driver:
+
+```bash
+python -m pip install torch --index-url https://download.pytorch.org/whl/cu128
+python -m pip install -e ".[dev]"
+python -c "import torch; print(torch.__version__, torch.version.cuda); assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0))"
+```
+
+Use a fresh environment when switching from a CPU-only PyTorch installation. If the CUDA check fails,
+check the driver and use the wheel channel recommended by the [PyTorch installer](https://pytorch.org/get-started/locally/).
+PyTorch training needs neither a separate CUDA toolkit nor Triton, Mojo, Rust, or `just`.
 
 Optional extras are declared in `pyproject.toml`:
 
@@ -228,50 +244,61 @@ just table
 
 These commands exercise the reference/golden workflow and the benchmark harness. They are not evidence that a complete pretraining run has been performed.
 
-The current suite is **85 passed, 7 skipped** on this host. Every skip is a GPU row, a Linux-only Rust
-binary, or a rust-trained tokenizer cross-check that needs `BRAINLAB_TOKENIZER_DIR`. On a fresh clone with
-no golden tensors it is 51 passed, 19 skipped — the tensor suites explain how to generate them instead of
-failing.
+Earlier verification recorded **85 passed, 7 skipped** on this host and **51 passed, 19 skipped** on a fresh
+clone without golden tensors. Run the suite for current counts. GPU, external-binary and tokenizer checks
+need their respective runtime or fixtures; missing golden-tensor checks explain how to generate them.
 
-### GPU notebook environments
+### CPU and NVIDIA laptop training
 
-For a disposable Colab or Kaggle environment, the repository includes setup and GPU-check scripts:
-
-```bash
-!git clone https://github.com/AHK811/Brain-1.git /content/Brain-1
-%cd /content/Brain-1
-!bash scripts/setup_colab.sh
-!bash scripts/check_gpu.sh
-!just bench-rmsnorm --tag t4
-```
-
-GPU commands require a compatible runtime. A CPU-only environment cannot produce meaningful CUDA, Triton, or GPU-throughput results.
-
-`setup_colab.sh` installs the pinned Rust toolchain but not `just`, so the `just ...` recipes above need
-`cargo install just` first — or call the module directly, which is what every recipe wraps:
+Both devices use the same model, packed data and checkpoint format. After preparing data, a conservative
+starting point for a roughly 15 GB GPU is one sequence per micro-batch with gradient checkpointing:
 
 ```bash
-!cargo install just                                # once per container
-!.venv/bin/python -m brainlab.eval.perplexity --model checkpoints/brainlab-33m.safetensors --amp
-!brainlab bench --tag t4                           # same harness, no just required
+python -m brainlab.train.train --device cuda --dtype auto --micro-batch 1 --accum 32 --seq-len 1024 --grad-ckpt --eval-batches 8 --save-every 50 --out checkpoints/run1
 ```
 
-`--out` defaults to `checkpoints/`, which lives inside the cloned directory and is deleted when the runtime
-detaches. Point training at mounted storage instead, or a long run ends when the cell does:
+The matching CPU command keeps the same effective batch and data cursor:
 
 ```bash
-!just train --out /content/drive/MyDrive/brainlab-ckpt --steps 8000   # Colab
-!just train --out /kaggle/working/brainlab-ckpt --steps 8000          # Kaggle
+python -m brainlab.train.train --device cpu --dtype fp32 --micro-batch 1 --accum 32 --seq-len 1024 --eval-batches 8 --save-every 50 --out checkpoints/run1
 ```
 
-Resume is safe from that same directory: the checkpoint carries the data cursor and the best score, so a
-disconnect continues the run instead of replaying its first batches (see `docs/decisions.md`, D028). A
-step-by-step Kaggle notebook ships as [`notebooks/kaggle_train.ipynb`](notebooks/kaggle_train.ipynb).
+`--device auto` chooses CUDA when available, otherwise CPU. Explicit CUDA fails if unavailable rather than
+silently falling back. `--dtype auto` uses FP32 on CPU, native BF16 on supported CUDA devices, otherwise FP16
+with GradScaler. Master parameters and optimizer updates stay FP32; `--dtype fp16` preserves the original
+FP16 recipe. No memory fit or GPU speed has been measured on this host. Inspect `mem_gb` in the training log
+and test a short run in a separate output directory before committing to the full schedule.
 
-Kaggle notebooks ship with **Internet off**, which makes the clone cell fail with `git` exit 128 and no
-message, because `%%bash` captures stderr and discards it on failure. Turn Internet on for the clone and the
-install; after that the notebook needs no network, since the corpus route reads attached Kaggle Datasets of
-plain text rather than downloading from Hugging Face.
+For a quick CPU smoke test, use `--steps 4 --seq-len 32 --micro-batch 1 --accum 1 --eval-batches 1`
+and a separate output directory. That is not the full training recipe. Training data must have at least
+one micro-batch and validation must hold two disjoint evaluation windows.
+
+To move an ongoing run, copy its packed data, tokenizer, run settings and completed `.pt` checkpoint to the
+other machine; add `--resume path/to/step-000050.pt` to the same command with the new device. Only load
+trusted checkpoints. Keep sequence length, micro-batch, accumulation, seed, evaluation windows and planned
+total steps unchanged; new checkpoints reject mismatched settings. Paths may change, but data/tokenizer
+contents must not. Cross-device or precision changes are not bitwise-reproducible. The scaler is restored
+when applicable, or initialized when entering FP16 from a non-FP16 run. Automatic resume chooses the newest
+numbered checkpoint or `last.pt` by step, never `best.pt`. A forced shutdown can lose work since the last save.
+
+### Hosted notebook environments
+
+The [`Kaggle training notebook`](notebooks/kaggle_train.ipynb) provides CPU/CUDA selection, an explicit corpus
+or synthetic smoke route, a short probe, training, checkpoint restore, export and evaluation. Enable internet
+for clone/install and select an accelerator when using `DEVICE_REQUEST="cuda"`. Synthetic byte-tokenized data
+is only a pipeline check, not meaningful language-model training. To import a command-line run, set
+`RESUME_FROM`, `PACKED_DIR` and the original tokenizer/settings in its configuration cell. Saved settings are
+checked; the first import cannot retrospectively verify data/tokenizer hashes. Subsequent notebook resumes
+check the recorded content hashes. Older checkpoints lacking required run settings are rejected.
+
+Hosted setup uses `scripts/setup_colab.sh` and preserves a working preinstalled PyTorch installation.
+Set `BRAINLAB_DEVICE=cuda` to require CUDA, or `cpu` for CPU-only operation; required setup failures stop the run.
+`BRAINLAB_PYTHON` selects the interpreter explicitly. `scripts/check_gpu.sh` writes a JSON capability report
+and exits nonzero without usable CUDA; that does not prevent CPU training.
+
+Keep active checkpoints on local runtime storage and copy completed saves to persistent storage. Colab
+runtime storage is disposable, so restore from a Drive backup after a reset. Kaggle outputs must be saved
+and explicitly attached to a later session before restoring. Neither platform guarantees automatic recovery.
 
 ### Before a long run
 
@@ -280,9 +307,9 @@ A parity-green tree is not evidence that the model learns. In order:
 1. Fresh clone, `pip install -e .`, `just golden`, `just test` — the suite must pass with nothing carried over.
 2. `just prepare` on the real corpus, then read `prepare_report.json` for `val_fraction` and `doc_sep`, and run `brainlab leak` against the packed splits.
 3. `just overfit`: one batch of data, many steps, loss should approach 0. If it plateaus near `ln(vocab_size)`, the model, the optimizer, or the loss has a bug no parity test can see.
-4. One short run on the GPU with `--amp`: `brainlab-ppl --amp` prints the logits dtype, which is how to check whether the tied output head really runs in fp16.
-5. `just wsl-resume`: kill a run mid-flight, resume it, and require the loss curve to match.
-6. Only then the full run, ending with `brainlab-ppl` over the whole validation set.
+4. One short GPU training run with `--dtype auto`; use `python -m brainlab.eval.perplexity --amp` for a separate FP16 whole-model evaluation comparison, not an isolated head-precision test.
+5. `just wsl-resume`: kill a run mid-flight, resume it, and require the loss curve to match on the same device and settings.
+6. Only then the full run, ending with `python -m brainlab.eval.perplexity` over the whole validation set.
 
 ### Rust on Windows
 
