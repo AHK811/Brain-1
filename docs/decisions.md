@@ -392,3 +392,7 @@ windows. Verified: 7-8 compact rows recovered, `git d60cef3...+dirty`, `eval_tra
 The footgun itself is in `train.py`, and removing it means changing the stdout format that the overfit and
 resume scripts parse, so it is left alone here and recorded as a one-line follow-up: emit the header to stdout
 in the same compact form the log uses, and let the pretty copy be a human convenience behind a flag.
+
+
+
+
