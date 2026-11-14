@@ -300,3 +300,5 @@ the same run as its baseline.
 **Performance status:** initial Rust CPU numbers and first operation/decode profiles are available; a fair full-model language comparison and stable serving-response measurements are not.  
 **Model-quality status:** unknown. The current smoke training and random-initialized golden weights do not demonstrate useful LLM capability.  
 **Recommended next milestone:** finish the verification gate, reconcile the profile timing note, then produce the matched Python/PyTorch-versus-Rust benchmark and a stable decode measurement. Run a real-data validation experiment as the separate model-quality milestone.
+
+
