@@ -1,18 +1,36 @@
 from __future__ import annotations
 
 import json
+import re
 import struct
 import unicodedata
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
+from types import MappingProxyType
 
 import numpy as np
 
 MAGIC = b"BLTK"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 BYTE_TOKENS = 256
 MAX_WORD_BYTES = 32
+CONTROL_TOKENS = (
+    "<|image_start|>",
+    "<|image_end|>",
+    "<|thought_start|>",
+    "<|thought_end|>",
+    "<|call_start|>",
+    "<|call_end|>",
+    "<|response_start|>",
+    "<|response_end|>",
+    "<|system|>",
+    "<|user|>",
+    "<|assistant|>",
+    "<|turn_end|>",
+)
+SPECIAL_TOKENS = (*CONTROL_TOKENS, "<pad>", "<eos>")
+_SPECIAL_PATTERN = re.compile("|".join(re.escape(token) for token in SPECIAL_TOKENS))
 
 
 def is_alnum(ch: str) -> bool:
@@ -106,20 +124,52 @@ class Tokenizer:
     eos_id: int
     pad_id: int
     max_word_bytes: int = MAX_WORD_BYTES
+    special_tokens: Mapping[str, int] = field(init=False, repr=False)
     _ranks: dict[tuple[int, int], tuple[int, int]] = field(init=False, repr=False, default_factory=dict)
 
     def __post_init__(self) -> None:
-        if len(self.token_bytes) <= max(self.eos_id, self.pad_id):
-            raise ValueError("special ids outside vocab")
-        for index, pair in enumerate(self.merges):
-            self._ranks.setdefault(pair, (index, BYTE_TOKENS + index))
-        expected = tuple(range(BYTE_TOKENS))
-        if tuple(self.token_bytes[:BYTE_TOKENS]) != tuple(bytes([b]) for b in expected):
+        special_start = BYTE_TOKENS + len(self.merges)
+        special_count = self.vocab_size - special_start
+        if special_count not in (2, len(SPECIAL_TOKENS)):
+            raise ValueError("vocab must contain bytes, ranked merges, then the complete special suffix")
+        labels = SPECIAL_TOKENS if special_count == len(SPECIAL_TOKENS) else SPECIAL_TOKENS[-2:]
+        if self.token_bytes[special_start:] != tuple(label.encode("ascii") for label in labels):
+            raise ValueError("special tokens are missing or out of order")
+        if self.eos_id != self.vocab_size - 1 or self.pad_id != self.vocab_size - 2:
+            raise ValueError("pad and eos must be the final two ids")
+        if not 4 <= self.max_word_bytes <= MAX_WORD_BYTES:
+            raise ValueError("max_word_bytes must be between 4 and 32")
+        if self.token_bytes[:BYTE_TOKENS] != tuple(bytes([b]) for b in range(BYTE_TOKENS)):
             raise ValueError("ids 0..255 must be single bytes per spec/tokenizer_spec.md")
+        protected = tuple(label.encode("ascii") for label in SPECIAL_TOKENS)
+        seen = set(self.token_bytes[:BYTE_TOKENS])
+        for rank, pair in enumerate(self.merges):
+            token_id = BYTE_TOKENS + rank
+            if len(pair) != 2 or any(type(child) is not int or not 0 <= child < token_id for child in pair):
+                raise ValueError(f"merge {rank} must reference earlier ordinary ids")
+            token = self.token_bytes[token_id]
+            if token != self.token_bytes[pair[0]] + self.token_bytes[pair[1]]:
+                raise ValueError(f"merge {rank} bytes disagree with its children")
+            if len(token) > MAX_WORD_BYTES or any(label in token for label in protected):
+                raise ValueError(f"merge {rank} is too long or contains protected bytes")
+            if token in seen or pair in self._ranks:
+                raise ValueError(f"duplicate merge {rank}")
+            seen.add(token)
+            self._ranks[pair] = (rank, token_id)
+        object.__setattr__(
+            self, "special_tokens", MappingProxyType({label: special_start + i for i, label in enumerate(labels)})
+        )
 
     @property
     def vocab_size(self) -> int:
         return len(self.token_bytes)
+
+    @property
+    def format_version(self) -> int:
+        return FORMAT_VERSION if len(self.special_tokens) == len(SPECIAL_TOKENS) else 1
+
+    def special_id(self, text: str) -> int:
+        return self.special_tokens[text]
 
     def encode_word(self, word: str) -> list[int]:
         out: list[int] = []
@@ -127,14 +177,22 @@ class Tokenizer:
             out.extend(encode_chunk(chunk, self._ranks))
         return out
 
-    def encode(self, text: str) -> list[int]:
+    def encode(self, text: str, allow_special: bool = False) -> list[int]:
         out: list[int] = []
-        for word in pre_tokenize(text):
+        start = 0
+        if allow_special:
+            for match in _SPECIAL_PATTERN.finditer(text):
+                token_id = self.special_tokens.get(match.group())
+                if token_id is not None:
+                    out.extend(self.encode(text[start : match.start()]))
+                    out.append(token_id)
+                    start = match.end()
+        for word in pre_tokenize(text[start:]):
             out.extend(self.encode_word(word))
         return out
 
-    def encode_docs(self, texts: Sequence[str]) -> list[list[int]]:
-        return [self.encode(text) for text in texts]
+    def encode_docs(self, texts: Sequence[str], allow_special: bool = False) -> list[list[int]]:
+        return [self.encode(text, allow_special=allow_special) for text in texts]
 
     def decode_ids(self, ids: Iterable[int], strict: bool = True) -> str:
         parts = bytearray()
@@ -164,48 +222,66 @@ class Tokenizer:
     @classmethod
     def from_bin(cls, path: Path) -> Tokenizer:
         raw = path.read_bytes()
+        if len(raw) < 22:
+            raise ValueError(f"{path}: tokenizer.bin is truncated")
         magic, version, vocab_size, n_merges = struct.unpack_from("<4sHII", raw, 0)
         if magic != MAGIC:
             raise ValueError(f"{path}: bad magic {magic!r}")
-        if version != FORMAT_VERSION:
+        if version not in (1, FORMAT_VERSION):
             raise ValueError(f"{path}: unsupported format version {version}")
+        special_count = 2 if version == 1 else len(SPECIAL_TOKENS)
+        if vocab_size != BYTE_TOKENS + n_merges + special_count:
+            raise ValueError(f"{path}: vocab size does not match version and merge count")
+        table_end = len(raw) - n_merges * 8 - 8
+        if table_end < 14 + vocab_size:
+            raise ValueError(f"{path}: tokenizer.bin is truncated")
         offset = 14
         tokens: list[bytes] = []
         for _ in range(vocab_size):
+            if offset >= table_end:
+                raise ValueError(f"{path}: truncated token table")
             length = raw[offset]
             offset += 1
+            if offset + length > table_end:
+                raise ValueError(f"{path}: truncated token body")
             tokens.append(bytes(raw[offset : offset + length]))
             offset += length
-        merges: list[tuple[int, int]] = []
-        for _ in range(n_merges):
-            merges.append(struct.unpack_from("<II", raw, offset))
-            offset += 8
-        eos_id, pad_id = struct.unpack_from("<II", raw, offset)
-        offset += 8
-        if offset != len(raw):
-            raise ValueError(f"{path}: {len(raw) - offset} trailing bytes")
-        return cls(token_bytes=tuple(tokens), merges=tuple(merges), eos_id=int(eos_id), pad_id=int(pad_id))
+        if offset != table_end:
+            raise ValueError(f"{path}: unexpected bytes in tokenizer.bin")
+        merges = tuple(struct.iter_unpack("<II", raw[offset : offset + n_merges * 8]))
+        eos_id, pad_id = struct.unpack_from("<II", raw, table_end + n_merges * 8)
+        return cls(token_bytes=tuple(tokens), merges=merges, eos_id=eos_id, pad_id=pad_id)
 
     @classmethod
     def from_vocab_files(cls, vocab_path: Path, merges_path: Path) -> Tokenizer:
         vocab = json.loads(vocab_path.read_text(encoding="utf-8"))
+        if not isinstance(vocab, dict) or not vocab:
+            raise ValueError(f"{vocab_path}: expected a nonempty vocabulary object")
+        if any(type(token_id) is not int for token_id in vocab.values()):
+            raise ValueError(f"{vocab_path}: token ids must be integers")
+        if set(vocab.values()) != set(range(len(vocab))):
+            raise ValueError(f"{vocab_path}: ids must be unique and contiguous from zero")
+        lines = merges_path.read_text(encoding="utf-8").splitlines()
+        versions = {"#version: 1.0": 1, "#version: 2.0": FORMAT_VERSION}
+        if not lines or lines[0] not in versions:
+            raise ValueError(f"{merges_path}: unsupported or missing version comment")
         pairs: list[tuple[int, int]] = []
-        for line_no, line in enumerate(merges_path.read_text(encoding="utf-8").splitlines()):
-            if line_no == 0:
-                if not line.startswith("#version:"):
-                    raise ValueError(f"{merges_path}: first line must be a version comment")
-                continue
+        for line in lines[1:]:
             if not line.strip():
                 continue
             left, right = line.split()
+            if not left.isascii() or not right.isascii() or not left.isdecimal() or not right.isdecimal():
+                raise ValueError(f"{merges_path}: merge ids must be unsigned decimal integers")
             pairs.append((int(left), int(right)))
-        by_id: list[bytes] = [b""] * max(vocab.values()) + 1
+        by_id: list[bytes] = [b""] * len(vocab)
         for key, token_id in vocab.items():
-            by_id[int(token_id)] = key.encode("latin-1")
-        if any(item == b"" for item in by_id[:BYTE_TOKENS]):
-            raise ValueError(f"{vocab_path}: byte tokens 0..255 are missing")
-        eos_id, pad_id = len(by_id) - 1, len(by_id) - 2
-        return cls(token_bytes=tuple(by_id), merges=tuple(pairs), eos_id=eos_id, pad_id=pad_id)
+            by_id[token_id] = key.encode("latin-1")
+        tokenizer = cls(
+            token_bytes=tuple(by_id), merges=tuple(pairs), eos_id=len(by_id) - 1, pad_id=len(by_id) - 2
+        )
+        if tokenizer.format_version != versions[lines[0]]:
+            raise ValueError(f"{merges_path}: version does not match special token layout")
+        return tokenizer
 
     @classmethod
     def load(cls, directory: Path) -> Tokenizer:
@@ -217,7 +293,7 @@ class Tokenizer:
 
 
 def write_bin(tokenizer: Tokenizer, path: Path) -> Path:
-    body = bytearray(struct.pack("<4sHII", MAGIC, FORMAT_VERSION, tokenizer.vocab_size, len(tokenizer.merges)))
+    body = bytearray(struct.pack("<4sHII", MAGIC, tokenizer.format_version, tokenizer.vocab_size, len(tokenizer.merges)))
     for token in tokenizer.token_bytes:
         if len(token) > 255:
             raise ValueError("token longer than 255 bytes cannot be stored in tokenizer.bin")

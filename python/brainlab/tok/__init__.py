@@ -1,5 +1,6 @@
 from brainlab.tok.reference import (
     BYTE_TOKENS,
+    CONTROL_TOKENS,
     MAX_WORD_BYTES,
     Tokenizer,
     encode_chunk,
@@ -10,6 +11,7 @@ from brainlab.tok.reference import (
 
 __all__ = [
     "BYTE_TOKENS",
+    "CONTROL_TOKENS",
     "MAX_WORD_BYTES",
     "Tokenizer",
     "encode_chunk",

@@ -16,12 +16,14 @@ TORCH_DTYPE = {"f32": torch.float32, "f16": torch.float16}
 MODULE_TO_FORMAT = {
     "token_emb.weight": "token_emb.weight",
     "final_norm.weight": "final_norm.weight",
+    "lm_head.weight": "lm_head.weight",
 }
 BLOCK_TO_FORMAT = {
     "attn_norm.weight": "attn_norm.weight",
     "attn.qkv.weight": "attn_qkv.weight",
     "attn.proj.weight": "attn_proj.weight",
     "mlp_norm.weight": "mlp_norm.weight",
+    "mlp.router.weight": "mlp_router.weight",
     "mlp.gate.weight": "mlp_gate.weight",
     "mlp.up.weight": "mlp_up.weight",
     "mlp.down.weight": "mlp_down.weight",

@@ -13,6 +13,7 @@ class LRSchedule:
     total_steps: int
     min_lr_fraction: float = 0.1
     decay: str = "cosine"
+    stable_fraction: float = 0.7
 
     def __post_init__(self) -> None:
         if self.peak_lr <= 0:
@@ -25,8 +26,12 @@ class LRSchedule:
             raise ValueError("warmup_steps must be shorter than total_steps")
         if not 0 <= self.min_lr_fraction < 1:
             raise ValueError("min_lr_fraction must be in [0, 1)")
-        if self.decay not in {"cosine", "linear", "constant"}:
+        if self.decay not in {"cosine", "linear", "constant", "wsd"}:
             raise ValueError(f"unknown decay {self.decay}")
+        if not 0 < self.stable_fraction < 1:
+            raise ValueError("stable_fraction must be in (0, 1)")
+        if self.decay == "wsd" and self.warmup_steps > self.total_steps * self.stable_fraction:
+            raise ValueError("warmup_steps must end before the WSD decay phase")
 
     def lr_at(self, step: int) -> float:
         if step < 0:
@@ -36,6 +41,10 @@ class LRSchedule:
         remaining = self.total_steps - self.warmup_steps
         progress = min(max((step - self.warmup_steps) / remaining, 0.0), 1.0)
         floor = self.peak_lr * self.min_lr_fraction
+        if self.decay == "wsd":
+            decay_start = self.total_steps * self.stable_fraction
+            progress = min(max((step - decay_start) / (self.total_steps - decay_start), 0.0), 1.0)
+            return floor + (self.peak_lr - floor) * (1.0 - progress)
         if self.decay == "constant":
             return self.peak_lr
         if self.decay == "linear":
@@ -56,6 +65,7 @@ class LRSchedule:
             total_steps=int(schedule["total_steps"]),
             min_lr_fraction=float(schedule.get("min_lr_fraction", 0.1)),
             decay=str(schedule.get("decay", "cosine")),
+            stable_fraction=float(schedule.get("stable_fraction", 0.7)),
         )
 
 

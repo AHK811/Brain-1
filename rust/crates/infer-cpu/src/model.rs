@@ -1,6 +1,6 @@
-use crate::attention::{attention_cache, attention_causal};
+use crate::attention::{attention_cache_gqa, attention_causal_gqa};
 use crate::golden::load_arrays;
-use crate::kernels::rmsnorm_row;
+use crate::kernels::{rmsnorm_row, softmax_row};
 use crate::matmul::linear_tiled;
 use crate::profile;
 use crate::rope::RopeTable;
@@ -17,10 +17,14 @@ pub struct ModelSpec {
     pub d_model: usize,
     pub n_layers: usize,
     pub n_heads: usize,
+    pub n_kv_heads: usize,
     pub head_dim: usize,
     pub vocab_size: usize,
     pub context_len: usize,
     pub mlp_hidden: usize,
+    pub n_experts: usize,
+    pub experts_per_token: usize,
+    pub router_aux_loss_coef: f32,
     pub rms_norm_eps: f32,
     pub rope_theta: f32,
     pub dropout: f32,
@@ -32,12 +36,32 @@ pub struct ModelSpec {
     pub param_tolerance: f32,
 }
 
+pub const SPEC_VERSION: &str = "2";
+
 impl ModelSpec {
+    pub fn qkv_out(&self) -> usize {
+        (self.n_heads + 2 * self.n_kv_heads) * self.head_dim
+    }
+
+    pub fn kv_width(&self) -> usize {
+        self.n_kv_heads * self.head_dim
+    }
+
+    fn checked_param_count(&self) -> Option<usize> {
+        let d = self.d_model;
+        let qkv = self.n_heads.checked_add(self.n_kv_heads.checked_mul(2)?)?
+            .checked_mul(self.head_dim)?;
+        let embedding = self.vocab_size.checked_mul(d)?
+            .checked_mul(if self.tie_embeddings { 1 } else { 2 })?;
+        let experts = self.n_experts.checked_mul(3)?.checked_mul(self.mlp_hidden)?.checked_mul(d)?;
+        let router = if self.n_experts > 1 { self.n_experts.checked_mul(d)? } else { 0 };
+        let per_layer = qkv.checked_mul(d)?.checked_add(d.checked_mul(d)?)?
+            .checked_add(d.checked_mul(2)?)?.checked_add(experts)?.checked_add(router)?;
+        embedding.checked_add(self.n_layers.checked_mul(per_layer)?)?.checked_add(d)
+    }
+
     pub fn param_count(&self) -> usize {
-        let embedding = self.vocab_size * self.d_model * if self.tie_embeddings { 1 } else { 2 };
-        let per_layer =
-            4 * self.d_model * self.d_model + 3 * self.mlp_hidden * self.d_model + 2 * self.d_model;
-        embedding + self.n_layers * per_layer + self.d_model
+        self.checked_param_count().expect("model parameter count overflow")
     }
 
     pub fn attn_scale(&self) -> f32 {
@@ -46,30 +70,37 @@ impl ModelSpec {
 
     pub fn validate(&self) -> Result<()> {
         ensure!(
-            self.n_heads * self.head_dim == self.d_model,
-            "n_heads*head_dim must equal d_model"
-        );
-        ensure!(
-            self.head_dim.is_multiple_of(2),
-            "head_dim must be even for split-half rope"
-        );
-        ensure!(
-            self.qkv_fused,
-            "only fused qkv is supported by spec/weights_format.md"
-        );
-        ensure!(self.tie_embeddings, "only tied embeddings are exported");
-        ensure!(self.vocab_size <= 65536, "vocab must fit uint16 shards");
-        ensure!(self.rms_norm_eps > 0.0, "rms_norm_eps must be positive");
-        ensure!(
-            self.n_layers > 0 && self.context_len > 0 && self.mlp_hidden > 0,
+            self.d_model > 0 && self.n_layers > 0 && self.n_heads > 0 && self.n_kv_heads > 0
+                && self.head_dim > 0 && self.vocab_size > 0 && self.context_len > 0
+                && self.mlp_hidden > 0 && self.n_experts > 0,
             "dimensions must be positive"
         );
-        let drift =
-            (self.param_count() as f64 - self.param_budget as f64).abs() / self.param_budget as f64;
         ensure!(
-            drift <= self.param_tolerance as f64,
-            "param count drift {drift:.3} exceeds tolerance"
+            self.n_heads.checked_mul(self.head_dim) == Some(self.d_model),
+            "n_heads*head_dim must equal d_model"
         );
+        ensure!(self.n_heads.is_multiple_of(self.n_kv_heads), "n_heads must be divisible by n_kv_heads");
+        ensure!(self.head_dim.is_multiple_of(2), "head_dim must be even for split-half rope");
+        ensure!(
+            self.experts_per_token > 0 && self.experts_per_token <= self.n_experts,
+            "experts_per_token must be in 1..=n_experts"
+        );
+        ensure!(
+            self.router_aux_loss_coef.is_finite() && self.router_aux_loss_coef >= 0.0,
+            "router_aux_loss_coef must be finite and nonnegative"
+        );
+        ensure!(self.qkv_fused, "only fused qkv is supported by spec/weights_format.md");
+        ensure!(self.vocab_size <= 65536, "vocab must fit uint16 shards");
+        ensure!(self.rms_norm_eps.is_finite() && self.rms_norm_eps > 0.0, "rms_norm_eps must be finite and positive");
+        ensure!(self.rope_theta.is_finite() && self.rope_theta > 0.0, "rope_theta must be finite and positive");
+        ensure!(self.dropout.is_finite() && (0.0..1.0).contains(&self.dropout), "dropout must be in [0, 1)");
+        ensure!(self.init_std.is_finite() && self.init_std > 0.0, "init_std must be finite and positive");
+        ensure!(self.residual_scale_layers > 0, "residual_scale_layers must be positive");
+        ensure!(self.param_budget > 0, "param_budget must be positive");
+        ensure!(self.param_tolerance.is_finite() && self.param_tolerance >= 0.0, "param_tolerance must be finite and nonnegative");
+        let count = self.checked_param_count().context("model parameter count overflow")?;
+        let drift = (count as f64 - self.param_budget as f64).abs() / self.param_budget as f64;
+        ensure!(drift <= self.param_tolerance as f64, "param count drift {drift:.3} exceeds tolerance");
         Ok(())
     }
 
@@ -79,15 +110,28 @@ impl ModelSpec {
         let mut map: BTreeMap<String, Vec<usize>> = BTreeMap::new();
         map.insert("token_emb.weight".to_string(), vec![self.vocab_size, d]);
         map.insert("final_norm.weight".to_string(), vec![d]);
+        if !self.tie_embeddings {
+            map.insert("lm_head.weight".to_string(), vec![self.vocab_size, d]);
+        }
         for layer in 0..self.n_layers {
             let prefix = format!("layers.{layer}.");
             map.insert(prefix.clone() + "attn_norm.weight", vec![d]);
-            map.insert(prefix.clone() + "attn_qkv.weight", vec![3 * d, d]);
+            map.insert(prefix.clone() + "attn_qkv.weight", vec![self.qkv_out(), d]);
             map.insert(prefix.clone() + "attn_proj.weight", vec![d, d]);
             map.insert(prefix.clone() + "mlp_norm.weight", vec![d]);
-            map.insert(prefix.clone() + "mlp_gate.weight", vec![h, d]);
-            map.insert(prefix.clone() + "mlp_up.weight", vec![h, d]);
-            map.insert(prefix.clone() + "mlp_down.weight", vec![d, h]);
+            if self.n_experts > 1 {
+                map.insert(prefix.clone() + "mlp_router.weight", vec![self.n_experts, d]);
+            }
+            for expert in 0..self.n_experts {
+                let mlp = if self.n_experts == 1 {
+                    prefix.clone()
+                } else {
+                    format!("{prefix}experts.{expert}.")
+                };
+                map.insert(mlp.clone() + "mlp_gate.weight", vec![h, d]);
+                map.insert(mlp.clone() + "mlp_up.weight", vec![h, d]);
+                map.insert(mlp + "mlp_down.weight", vec![d, h]);
+            }
         }
         map
     }
@@ -152,6 +196,11 @@ impl Weights {
     pub fn load(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
         let metadata = read_header_metadata(path)?;
+        ensure!(
+            metadata.get("brainlab.spec_version").map(String::as_str) == Some(SPEC_VERSION),
+            "unsupported brainlab.spec_version {:?}; expected {SPEC_VERSION}",
+            metadata.get("brainlab.spec_version")
+        );
         let config = metadata
             .get("brainlab.config_json")
             .context("checkpoint metadata is missing brainlab.config_json")?;
@@ -213,6 +262,51 @@ impl Weights {
     pub fn n_tensors(&self) -> usize {
         self.tensors.len()
     }
+
+    pub fn output_head(&self) -> Result<&[f32]> {
+        self.tensor(if self.spec.tie_embeddings { "token_emb.weight" } else { "lm_head.weight" })
+    }
+}
+
+pub fn route_topk(logits: &[f32], top_k: usize) -> Result<Vec<(usize, f32)>> {
+    ensure!(top_k > 0 && top_k <= logits.len(), "top_k must be in 1..=number of experts");
+    ensure!(logits.iter().all(|value| value.is_finite()), "router logits must be finite");
+    let mut indices: Vec<usize> = (0..logits.len()).collect();
+    indices.sort_by(|&a, &b| logits[b].partial_cmp(&logits[a]).unwrap());
+    indices.truncate(top_k);
+    let mut probabilities: Vec<f32> = indices.iter().map(|&index| logits[index]).collect();
+    softmax_row(&mut probabilities);
+    Ok(indices.into_iter().zip(probabilities).collect())
+}
+
+fn swiglu(
+    weights: &Weights,
+    prefix: &str,
+    input: &[f32],
+    hidden: &mut [f32],
+    activated: &mut [f32],
+    out: &mut [f32],
+) -> Result<()> {
+    let (d, h) = (weights.spec.d_model, weights.spec.mlp_hidden);
+    let seq = input.len() / d;
+    let gate = weights.tensor(&format!("{prefix}mlp_gate.weight"))?;
+    let up = weights.tensor(&format!("{prefix}mlp_up.weight"))?;
+    let down = weights.tensor(&format!("{prefix}mlp_down.weight"))?;
+    let stamp = profile::start();
+    linear_tiled(input, gate, hidden, seq, d, h, None)?;
+    profile::record("linear_gate", stamp);
+    let stamp = profile::start();
+    linear_tiled(input, up, activated, seq, d, h, None)?;
+    profile::record("linear_up", stamp);
+    let stamp = profile::start();
+    for (slot, value) in hidden.iter_mut().zip(activated.iter()) {
+        *slot = silu(*slot) * *value;
+    }
+    profile::record("silu_mul", stamp);
+    let stamp = profile::start();
+    linear_tiled(hidden, down, out, seq, h, d, None)?;
+    profile::record("linear_down", stamp);
+    Ok(())
 }
 
 pub struct Engine<'w> {
@@ -236,27 +330,25 @@ pub struct Engine<'w> {
 impl<'w> Engine<'w> {
     pub fn new(weights: &'w Weights) -> Result<Self> {
         let spec = &weights.spec;
+        spec.validate()?;
         let d = spec.d_model;
+        let kv = spec.kv_width();
         let capacity = spec.context_len;
-        ensure!(
-            spec.n_heads * spec.head_dim == d,
-            "engine needs n_heads*head_dim == d_model"
-        );
         Ok(Self {
             weights,
             rope: RopeTable::new(capacity, spec.head_dim, spec.rope_theta)?,
             x: vec![0.0; capacity * d],
             rms: vec![0.0; capacity * d],
-            qkv: vec![0.0; capacity * 3 * d],
+            qkv: vec![0.0; capacity * spec.qkv_out()],
             q: vec![0.0; capacity * d],
-            k: vec![0.0; capacity * d],
-            v: vec![0.0; capacity * d],
+            k: vec![0.0; capacity * kv],
+            v: vec![0.0; capacity * kv],
             attention_out: vec![0.0; capacity * d],
             mixed: vec![0.0; capacity * d],
             hidden: vec![0.0; capacity * spec.mlp_hidden],
             activated: vec![0.0; capacity * spec.mlp_hidden],
-            cache_k: vec![0.0; spec.n_layers * capacity * d],
-            cache_v: vec![0.0; spec.n_layers * capacity * d],
+            cache_k: vec![0.0; spec.n_layers * capacity * kv],
+            cache_v: vec![0.0; spec.n_layers * capacity * kv],
             kv_len: 0,
         })
     }
@@ -289,19 +381,33 @@ impl<'w> Engine<'w> {
 
     fn split_qkv(&mut self, spec: &'w ModelSpec, seq: usize) {
         let (heads, hd, d) = (spec.n_heads, spec.head_dim, spec.d_model);
+        let kv = spec.kv_width();
         for position in 0..seq {
-            let row = position * 3 * d;
+            let row = position * spec.qkv_out();
             for head in 0..heads {
                 let dst = head * seq * hd + position * hd;
                 self.q[dst..dst + hd]
                     .copy_from_slice(&self.qkv[row + head * hd..row + head * hd + hd]);
-                self.k[dst..dst + hd]
-                    .copy_from_slice(&self.qkv[row + d + head * hd..row + d + head * hd + hd]);
-                self.v[dst..dst + hd].copy_from_slice(
-                    &self.qkv[row + 2 * d + head * hd..row + 2 * d + head * hd + hd],
-                );
+            }
+            for head in 0..spec.n_kv_heads {
+                let dst = head * seq * hd + position * hd;
+                let key = row + d + head * hd;
+                let value = key + kv;
+                self.k[dst..dst + hd].copy_from_slice(&self.qkv[key..key + hd]);
+                self.v[dst..dst + hd].copy_from_slice(&self.qkv[value..value + hd]);
             }
         }
+    }
+
+    fn apply_rope(&mut self, spec: &ModelSpec, seq: usize, position: usize) -> Result<()> {
+        let plane = seq * spec.head_dim;
+        for head in 0..spec.n_heads {
+            self.rope.apply_rows(&mut self.q[head * plane..(head + 1) * plane], position)?;
+        }
+        for head in 0..spec.n_kv_heads {
+            self.rope.apply_rows(&mut self.k[head * plane..(head + 1) * plane], position)?;
+        }
+        Ok(())
     }
 
     fn store_kv(
@@ -311,12 +417,12 @@ impl<'w> Engine<'w> {
         seq: usize,
         row: usize,
     ) -> Result<()> {
-        let (heads, hd, d) = (spec.n_heads, spec.head_dim, spec.d_model);
+        let hd = spec.head_dim;
         if row + seq > spec.context_len {
             bail!("kv cache would exceed context_len {}", spec.context_len);
         }
-        let base = layer * spec.context_len * d;
-        for head in 0..heads {
+        let base = layer * spec.context_len * spec.kv_width();
+        for head in 0..spec.n_kv_heads {
             for position in 0..seq {
                 let src = head * seq * hd + position * hd;
                 let dst = base + head * spec.context_len * hd + (row + position) * hd;
@@ -342,54 +448,44 @@ impl<'w> Engine<'w> {
             );
         }
         profile::record("rmsnorm_mlp", stamp);
-        let gate = weights.layer_tensor(layer, "mlp_gate.weight")?;
-        let up = weights.layer_tensor(layer, "mlp_up.weight")?;
-        let stamp = profile::start();
-        linear_tiled(
-            &self.rms[..seq * d],
-            gate,
-            &mut self.hidden[..seq * h],
-            seq,
-            d,
-            h,
-            None,
-        )?;
-        profile::record("linear_gate", stamp);
-        let stamp = profile::start();
-        linear_tiled(
-            &self.rms[..seq * d],
-            up,
-            &mut self.activated[..seq * h],
-            seq,
-            d,
-            h,
-            None,
-        )?;
-        profile::record("linear_up", stamp);
-        let stamp = profile::start();
-        for value in self.hidden[..seq * h]
-            .iter_mut()
-            .zip(self.activated[..seq * h].iter())
-        {
-            let (slot, gate_value) = value;
-            *slot = silu(*slot) * *gate_value;
+        if spec.n_experts == 1 {
+            swiglu(
+                weights,
+                &format!("layers.{layer}."),
+                &self.rms[..seq * d],
+                &mut self.hidden[..seq * h],
+                &mut self.activated[..seq * h],
+                &mut self.mixed[..seq * d],
+            )?;
+        } else {
+            let router = weights.layer_tensor(layer, "mlp_router.weight")?;
+            let mut logits = vec![0.0; spec.n_experts];
+            self.mixed[..seq * d].fill(0.0);
+            for position in 0..seq {
+                let row = position * d;
+                let input = &self.rms[row..row + d];
+                let stamp = profile::start();
+                linear_tiled(input, router, &mut logits, 1, d, spec.n_experts, None)?;
+                let routes = route_topk(&logits, spec.experts_per_token)?;
+                profile::record("moe_router", stamp);
+                for (expert, probability) in routes {
+                    swiglu(
+                        weights,
+                        &format!("layers.{layer}.experts.{expert}."),
+                        input,
+                        &mut self.hidden[..h],
+                        &mut self.activated[..h],
+                        &mut self.attention_out[..d],
+                    )?;
+                    for index in 0..d {
+                        self.mixed[row + index] += probability * self.attention_out[index];
+                    }
+                }
+            }
         }
-        profile::record("silu_mul", stamp);
-        let down = weights.layer_tensor(layer, "mlp_down.weight")?;
-        let stamp = profile::start();
-        linear_tiled(
-            &self.hidden[..seq * h],
-            down,
-            &mut self.rms[..seq * d],
-            seq,
-            h,
-            d,
-            None,
-        )?;
-        profile::record("linear_down", stamp);
         let stamp = profile::start();
         for index in 0..seq * d {
-            self.x[index] += self.rms[index];
+            self.x[index] += self.mixed[index];
         }
         profile::record("residual_mlp", stamp);
         Ok(())
@@ -410,11 +506,11 @@ impl<'w> Engine<'w> {
             );
         }
         profile::record("rmsnorm_final", stamp);
-        let embedding = weights.tensor("token_emb.weight")?;
+        let output_head = weights.output_head()?;
         let stamp = profile::start();
         linear_tiled(
             &self.rms[..seq * d],
-            embedding,
+            output_head,
             &mut logits[..seq * spec.vocab_size],
             seq,
             d,
@@ -443,11 +539,11 @@ impl<'w> Engine<'w> {
             spec.rms_norm_eps,
         );
         profile::record("rmsnorm_final", stamp);
-        let embedding = weights.tensor("token_emb.weight")?;
+        let output_head = weights.output_head()?;
         let stamp = profile::start();
         linear_tiled(
             &self.rms[..d],
-            embedding,
+            output_head,
             logits_row,
             1,
             d,
@@ -459,9 +555,12 @@ impl<'w> Engine<'w> {
     }
 
     pub fn kv_cache(&self) -> (&[f32], &[f32]) {
+        (&self.cache_k, &self.cache_v)
+    }
+
+    pub fn kv_cache_shape(&self) -> [usize; 4] {
         let spec = &self.weights.spec;
-        let used = spec.n_layers * spec.context_len * spec.d_model;
-        (&self.cache_k[..used], &self.cache_v[..used])
+        [spec.n_layers, spec.n_kv_heads, spec.context_len, spec.head_dim]
     }
 
     fn check_sequence(&self, seq: usize) -> Result<usize> {
@@ -709,11 +808,11 @@ impl<'w> Engine<'w> {
             spec.rms_norm_eps,
         );
         profile::record("decode_rmsnorm_final", stamp);
-        let embedding = weights.tensor("token_emb.weight")?;
+        let output_head = weights.output_head()?;
         let stamp = profile::start();
         linear_tiled(
             &self.rms[..d],
-            embedding,
+            output_head,
             logits_row,
             1,
             d,

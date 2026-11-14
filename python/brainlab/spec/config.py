@@ -12,16 +12,20 @@ try:
 except ModuleNotFoundError:  # pragma: no cover - python 3.10 only
     import tomli as tomllib
 
-SPEC_VERSION = "1"
+SPEC_VERSION = "2"
 _MODEL_KEYS = (
     "name",
     "d_model",
     "n_layers",
     "n_heads",
+    "n_kv_heads",
     "head_dim",
     "vocab_size",
     "context_len",
     "mlp_hidden",
+    "n_experts",
+    "experts_per_token",
+    "router_aux_loss_coef",
     "rms_norm_eps",
     "rope_theta",
     "dropout",
@@ -40,10 +44,14 @@ class ModelSpec:
     d_model: int
     n_layers: int
     n_heads: int
+    n_kv_heads: int
     head_dim: int
     vocab_size: int
     context_len: int
     mlp_hidden: int
+    n_experts: int
+    experts_per_token: int
+    router_aux_loss_coef: float
     rms_norm_eps: float
     rope_theta: float
     dropout: float
@@ -55,8 +63,12 @@ class ModelSpec:
     param_tolerance: float
 
     @property
+    def kv_dim(self) -> int:
+        return self.n_kv_heads * self.head_dim
+
+    @property
     def qkv_out(self) -> int:
-        return 3 * self.d_model
+        return self.d_model + 2 * self.kv_dim
 
     @property
     def attn_scale(self) -> float:
@@ -64,32 +76,47 @@ class ModelSpec:
 
     @property
     def param_count(self) -> int:
-        d, h, v, l = self.d_model, self.mlp_hidden, self.vocab_size, self.n_layers
-        emb = v * d * (1 if self.tie_embeddings else 2)
-        per_layer = 4 * d * d + 3 * h * d + 2 * d
-        return emb + l * per_layer + d
+        return sum(math.prod(shape) for shape in self.tensor_shapes().values())
 
     def tensor_shapes(self) -> dict[str, tuple[int, ...]]:
         d, h, v = self.d_model, self.mlp_hidden, self.vocab_size
         shapes = {"token_emb.weight": (v, d), "final_norm.weight": (d,)}
+        if not self.tie_embeddings:
+            shapes["lm_head.weight"] = (v, d)
         for i in range(self.n_layers):
             p = f"layers.{i}."
             shapes[p + "attn_norm.weight"] = (d,)
-            shapes[p + "attn_qkv.weight"] = (3 * d, d)
+            shapes[p + "attn_qkv.weight"] = (self.qkv_out, d)
             shapes[p + "attn_proj.weight"] = (d, d)
             shapes[p + "mlp_norm.weight"] = (d,)
-            shapes[p + "mlp_gate.weight"] = (h, d)
-            shapes[p + "mlp_up.weight"] = (h, d)
-            shapes[p + "mlp_down.weight"] = (d, h)
+            if self.n_experts > 1:
+                shapes[p + "mlp_router.weight"] = (self.n_experts, d)
+            for expert in range(self.n_experts):
+                prefix = p if self.n_experts == 1 else f"{p}experts.{expert}."
+                shapes[prefix + "mlp_gate.weight"] = (h, d)
+                shapes[prefix + "mlp_up.weight"] = (h, d)
+                shapes[prefix + "mlp_down.weight"] = (d, h)
         return shapes
 
     def validate(self) -> None:
+        dimensions = (self.d_model, self.n_layers, self.n_heads, self.n_kv_heads,
+                      self.head_dim, self.mlp_hidden, self.residual_scale_layers, self.param_budget)
+        if any(type(value) is not int or value < 1 for value in dimensions):
+            raise ValueError("model dimensions and parameter budget must be positive integers")
         if self.n_heads * self.head_dim != self.d_model:
             raise ValueError(f"n_heads*head_dim={self.n_heads * self.head_dim} != d_model={self.d_model}")
+        if self.n_heads % self.n_kv_heads:
+            raise ValueError("n_heads must be divisible by n_kv_heads")
+        if type(self.n_experts) is not int or self.n_experts not in {1, 4, 8}:
+            raise ValueError("n_experts must be 1, 4 or 8")
+        if self.experts_per_token not in {1, 2} or self.experts_per_token > self.n_experts:
+            raise ValueError("experts_per_token must be 1 or 2 and no greater than n_experts")
+        if not math.isfinite(self.router_aux_loss_coef) or self.router_aux_loss_coef < 0:
+            raise ValueError("router_aux_loss_coef must be finite and non-negative")
+        if not 0 <= self.dropout < 1 or not math.isfinite(self.rope_theta) or self.rope_theta <= 0:
+            raise ValueError("invalid dropout or RoPE theta")
         if not self.qkv_fused:
             raise ValueError("weights_format.md only defines fused qkv")
-        if not self.tie_embeddings and self.vocab_size * self.d_model > self.param_budget // 2:
-            raise ValueError("untied head doubles embedding cost beyond budget")
         if self.vocab_size > 65535:
             raise ValueError("vocab must fit uint16 packed shards")
         if self.vocab_size < 259:

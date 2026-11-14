@@ -14,23 +14,41 @@ pub fn attention_causal(
     head_dim: usize,
     scale: f32,
 ) -> Result<()> {
+    attention_causal_gqa(q, k, v, out, batch, heads, heads, seq, head_dim, scale)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn attention_causal_gqa(
+    q: &[f32],
+    k: &[f32],
+    v: &[f32],
+    out: &mut [f32],
+    batch: usize,
+    heads: usize,
+    kv_heads: usize,
+    seq: usize,
+    head_dim: usize,
+    scale: f32,
+) -> Result<()> {
+    ensure!(
+        batch > 0 && heads > 0 && kv_heads > 0 && seq > 0 && head_dim > 0,
+        "attention dimensions must be positive"
+    );
+    ensure!(heads.is_multiple_of(kv_heads), "query heads must be divisible by KV heads");
     let total = batch * heads * seq * head_dim;
-    ensure!(
-        q.len() == total && k.len() == total && v.len() == total && out.len() == total,
-        "attention buffers must all be {total} floats"
-    );
-    ensure!(
-        seq > 0 && head_dim > 0,
-        "attention needs a positive sequence and head width"
-    );
+    let kv_total = batch * kv_heads * seq * head_dim;
+    ensure!(q.len() == total && out.len() == total, "query/output must be {total} floats");
+    ensure!(k.len() == kv_total && v.len() == kv_total, "key/value must be {kv_total} floats");
+    let group = heads / kv_heads;
     let plane_stride = head_dim * seq;
     out.par_chunks_mut(plane_stride)
         .zip((0..batch * heads).into_par_iter())
         .for_each(|(out_plane, plane)| {
             let offset = plane * plane_stride;
+            let kv_offset = (plane / heads * kv_heads + (plane % heads) / group) * plane_stride;
             let q_plane = &q[offset..offset + plane_stride];
-            let k_plane = &k[offset..offset + plane_stride];
-            let v_plane = &v[offset..offset + plane_stride];
+            let k_plane = &k[kv_offset..kv_offset + plane_stride];
+            let v_plane = &v[kv_offset..kv_offset + plane_stride];
             let mut acc = vec![0.0f32; head_dim];
             for target in 0..seq {
                 let query = &q_plane[target * head_dim..(target + 1) * head_dim];
@@ -129,14 +147,33 @@ pub fn attention_cache(
     head_dim: usize,
     scale: f32,
 ) -> Result<()> {
+    attention_cache_gqa(query, keys, values, out, heads, heads, len, capacity, head_dim, scale)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn attention_cache_gqa(
+    query: &[f32],
+    keys: &[f32],
+    values: &[f32],
+    out: &mut [f32],
+    heads: usize,
+    kv_heads: usize,
+    len: usize,
+    capacity: usize,
+    head_dim: usize,
+    scale: f32,
+) -> Result<()> {
+    ensure!(heads > 0 && kv_heads > 0 && head_dim > 0, "attention dimensions must be positive");
+    ensure!(heads.is_multiple_of(kv_heads), "query heads must be divisible by KV heads");
+    let group = heads / kv_heads;
     let plane_stride = capacity * head_dim;
     ensure!(
         query.len() == heads * head_dim,
         "query must be {heads} rows of {head_dim}"
     );
     ensure!(
-        keys.len() == heads * plane_stride && values.len() == heads * plane_stride,
-        "cache must be {heads} planes of {capacity} rows"
+        keys.len() == kv_heads * plane_stride && values.len() == kv_heads * plane_stride,
+        "cache must be {kv_heads} planes of {capacity} rows"
     );
     ensure!(
         out.len() == heads * head_dim,
@@ -147,7 +184,7 @@ pub fn attention_cache(
         "cache length {len} outside 1..{capacity}"
     );
     for head in 0..heads {
-        let cache_offset = head * plane_stride;
+        let cache_offset = (head / group) * plane_stride;
         attention_query_row(
             &query[head * head_dim..(head + 1) * head_dim],
             &keys[cache_offset..cache_offset + len * head_dim],
