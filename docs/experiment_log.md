@@ -559,3 +559,6 @@ were written, and the earlier simulated runs never noticed because the same empt
 Reading `train_log.jsonl` restores it: `git d60cef3f...+dirty`, `device cpu`, `dtype fp32`, `start_batch 0`,
 `eval_track_window [0, 8]`, `eval_select_window [8, 16]`, `val_sequences 132`, and the assertion now evaluates
 and passes on the ranges. See D034.
+
+
+
